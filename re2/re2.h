@@ -181,6 +181,7 @@
 
 #include <stdint.h>
 #include <map>
+#include <mutex>
 #include <string>
 #include "re2/stringpiece.h"
 #include "re2/variadic_function.h"
@@ -193,24 +194,8 @@ namespace re2 {
 
 using std::string;
 using std::map;
-class Mutex;
 class Prog;
 class Regexp;
-
-// The following enum should be used only as a constructor argument to indicate
-// that the variable has static storage class, and that the constructor should
-// do nothing to its state.  It indicates to the reader that it is legal to
-// declare a static instance of the class, provided the constructor is given
-// the LINKER_INITIALIZED argument.  Normally, it is unsafe to declare a
-// static variable that has a constructor or a destructor because invocation
-// order is undefined.  However, IF the type can be initialized by filling with
-// zeroes (which the loader does for static variables), AND the type's
-// destructor does nothing to the storage, then a constructor for static
-// initialization can be declared as
-//       explicit MyClass(LinkerInitialized x) {}
-// and invoked as
-//       static MyClass my_variable_name(LINKER_INITIALIZED);
-enum LinkerInitialized { LINKER_INITIALIZED };
 
 // Interface for regular expression matching.  Also corresponds to a
 // pre-compiled regular expression.  An "RE2" object is safe for
@@ -746,21 +731,21 @@ class RE2 {
 
   re2::Prog* ReverseProg() const;
 
-  mutable Mutex*           mutex_;
-  string                   pattern_;       // string regular expression
-  Options                  options_;       // option flags
+  string        pattern_;          // string regular expression
+  Options       options_;          // option flags
   string        prefix_;           // required prefix (before regexp_)
   bool          prefix_foldcase_;  // prefix is ASCII case-insensitive
   re2::Regexp*  entire_regexp_;    // parsed regular expression
   re2::Regexp*  suffix_regexp_;    // parsed regular expression, prefix removed
   re2::Prog*    prog_;             // compiled program for regexp
-  mutable re2::Prog* rprog_;       // reverse program for regexp
-  bool                     is_one_pass_;   // can use prog_->SearchOnePass?
-  mutable const string*    error_;         // Error indicator
-                                           // (or points to empty string)
-  mutable ErrorCode        error_code_;    // Error code
-  mutable string           error_arg_;     // Fragment of regexp showing error
-  mutable int              num_captures_;  // Number of capturing groups
+  bool          is_one_pass_;      // can use prog_->SearchOnePass?
+
+  mutable re2::Prog*     rprog_;         // reverse program for regexp
+  mutable const string*  error_;         // Error indicator
+                                         // (or points to empty string)
+  mutable ErrorCode      error_code_;    // Error code
+  mutable string         error_arg_;     // Fragment of regexp showing error
+  mutable int            num_captures_;  // Number of capturing groups
 
   // Map from capture names to indices
   mutable const map<string, int>* named_groups_;
@@ -770,6 +755,12 @@ class RE2 {
 
   int           min_match_length_; // min possible match len
   int           max_match_length_; // max possible match len, -1=unbounded
+
+  // Onces for lazy computations.
+  mutable std::once_flag rprog_once_;
+  mutable std::once_flag num_captures_once_;
+  mutable std::once_flag named_groups_once_;
+  mutable std::once_flag group_names_once_;
 
   //DISALLOW_COPY_AND_ASSIGN(RE2);
   RE2(const RE2&);

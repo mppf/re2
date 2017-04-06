@@ -33,10 +33,9 @@ TEST(Repetition, Capturing) {
                  7, Explode("ab"), "(?:%s)", "");
 
   // This would be a great test, but it runs forever when PCRE is enabled.
-  if (strstr("PCRE", FLAGS_regexp_engines.c_str()) == NULL)
-    ExhaustiveTest(4, 3, Split(" ", "a (a)"), ops,
-                   100, Explode("a"), "(?:%s)", "");
+  if (!StringPiece(FLAGS_regexp_engines).contains("PCRE"))
+    ExhaustiveTest(3, 2, Split(" ", "a (a)"), ops,
+                   50, Explode("a"), "(?:%s)", "");
 }
 
 }  // namespace re2
-

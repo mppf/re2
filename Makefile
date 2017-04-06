@@ -2,15 +2,20 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
-# to build against PCRE for testing or benchmarking,
-# uncomment the next two lines
+# To build against ICU for full Unicode properties support,
+# uncomment the next two lines:
+# CCICU=$(shell pkg-config icu-uc --cflags) -DRE2_USE_ICU
+# LDICU=$(shell pkg-config icu-uc --libs)
+
+# To build against PCRE for testing or benchmarking,
+# uncomment the next two lines:
 # CCPCRE=-I/usr/local/include -DUSEPCRE
 # LDPCRE=-L/usr/local/lib -lpcre
 
 CXX?=g++
-CXXFLAGS?=-O3 -g -pthread  # can override
-RE2_CXXFLAGS?=-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -I. $(CCPCRE)  # required
-LDFLAGS?=-pthread
+CXXFLAGS?=-std=c++11 -O3 -g -pthread  # can override
+RE2_CXXFLAGS?=-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -I. $(CCICU) $(CCPCRE)  # required
+LDFLAGS?=-pthread $(LDICU)
 AR?=ar
 ARFLAGS?=rsc
 NM?=nm
@@ -39,7 +44,7 @@ ifeq ($(shell uname),Darwin)
 SOEXT=dylib
 SOEXTVER=$(SONAME).$(SOEXT)
 SOEXTVER00=$(SONAME).0.0.$(SOEXT)
-MAKE_SHARED_LIBRARY=$(CXX) -dynamiclib $(LDFLAGS) -Wl,-install_name,@rpath/libre2.$(SOEXTVER) -exported_symbols_list libre2.symbols.darwin
+MAKE_SHARED_LIBRARY=$(CXX) -dynamiclib -Wl,-install_name,@rpath/libre2.$(SOEXTVER),-exported_symbols_list,libre2.symbols.darwin $(LDFLAGS)
 else ifeq ($(shell uname),SunOS)
 SOEXT=so
 SOEXTVER=$(SOEXT).$(SONAME)
@@ -63,7 +68,6 @@ INSTALL_HFILES=\
 	re2/file_strings.h\
 
 HFILES=\
-	util/atomicops.h\
 	util/benchmark.h\
 	util/flags.h\
 	util/logging.h\
@@ -275,11 +279,15 @@ install: obj/libre2.a obj/so/libre2.$(SOEXT)
 testinstall:
 	@mkdir -p obj
 	cp testinstall.cc obj
-ifneq ($(shell uname),Darwin)
-	(cd obj && $(CXX) -I$(DESTDIR)$(includedir) -L$(DESTDIR)$(libdir) testinstall.cc -lre2 -pthread -static -o testinstall)
+ifeq ($(shell uname),Darwin)
+	@echo Skipping test for libre2.a on Darwin.
+else ifeq ($(shell uname),SunOS)
+	@echo Skipping test for libre2.a on SunOS.
+else
+	(cd obj && $(CXX) $(CXXFLAGS) -I$(DESTDIR)$(includedir) -L$(DESTDIR)$(libdir) testinstall.cc -l:libre2.a -o testinstall)
 	obj/testinstall
 endif
-	(cd obj && $(CXX) -I$(DESTDIR)$(includedir) -L$(DESTDIR)$(libdir) testinstall.cc -lre2 -pthread -o testinstall)
+	(cd obj && $(CXX) $(CXXFLAGS) -I$(DESTDIR)$(includedir) -L$(DESTDIR)$(libdir) testinstall.cc -lre2 -o testinstall)
 	LD_LIBRARY_PATH=$(DESTDIR)$(libdir) obj/testinstall
 
 benchlog: obj/test/regexp_benchmark

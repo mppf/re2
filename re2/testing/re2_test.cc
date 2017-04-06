@@ -6,7 +6,7 @@
 // TODO: Test extractions for PartialMatch/Consume
 
 #include <errno.h>
-#ifndef _MSC_VER
+#if !defined(_MSC_VER) && !defined(__MINGW32__)
 #include <unistd.h>  /* for sysconf */
 #include <sys/mman.h>
 #endif
@@ -16,8 +16,6 @@
 #include "util/test.h"
 #include "re2/re2.h"
 #include "re2/regexp.h"
-
-DECLARE_bool(logtostderr);
 
 namespace re2 {
 
@@ -1540,7 +1538,7 @@ TEST(RE2, Bug18458852) {
 }
 
 TEST(RE2, Bug18523943) {
-  // Bug in bitstate: case kFailInst was merged into the default with LOG(DFATAL).
+  // Bug in BitState: case kFailInst failed the match entirely.
 
   RE2::Options opt;
   const char a[] = {
@@ -1559,7 +1557,7 @@ TEST(RE2, Bug18523943) {
   RE2 re((const char*)b, opt);
   CHECK(re.ok());
   string s1;
-  CHECK(!RE2::PartialMatch((const char*)a, re, &s1));
+  CHECK(RE2::PartialMatch((const char*)a, re, &s1));
 }
 
 TEST(RE2, Bug21371806) {
@@ -1585,10 +1583,10 @@ TEST(RE2, Bug26356109) {
   string s = "abc";
   StringPiece m;
 
-  CHECK(re.Match(s, 0, s.size(), RE2::UNANCHORED, &m, 1));
+  CHECK(re.Match(s, 0, static_cast<int>(s.size()), RE2::UNANCHORED, &m, 1));
   CHECK_EQ(m, s) << " (UNANCHORED) got m='" << m << "', want '" << s << "'";
 
-  CHECK(re.Match(s, 0, s.size(), RE2::ANCHOR_BOTH, &m, 1));
+  CHECK(re.Match(s, 0, static_cast<int>(s.size()), RE2::ANCHOR_BOTH, &m, 1));
   CHECK_EQ(m, s) << " (ANCHOR_BOTH) got m='" << m << "', want '" << s << "'";
 }
 
