@@ -76,7 +76,6 @@ INSTALL_HFILES=\
 	re2/re2.h\
 	re2/set.h\
 	re2/stringpiece.h\
-	re2/variadic_function.h\
 
 HFILES=\
 	util/benchmark.h\
@@ -285,7 +284,7 @@ install: obj/libre2.a obj/so/libre2.$(SOEXT)
 	$(INSTALL_DATA) $(INSTALL_HFILES) $(DESTDIR)$(includedir)/re2
 	$(INSTALL) obj/libre2.a $(DESTDIR)$(libdir)/libre2.a
 	$(INSTALL) obj/so/libre2.$(SOEXT) $(DESTDIR)$(libdir)/libre2.$(SOEXTVER00)
-	if [ -n "`command -v install_name_tool`" ]; then install_name_tool -id $(DESTDIR)$(libdir)/libre2.$(SOEXTVER00).0.0 $(DESTDIR)$(libdir)/libre2.so.$(SOEXTVER00).0.0; fi
+	if [ -n "`command -v install_name_tool`" ]; then install_name_tool -id $(DESTDIR)$(libdir)/libre2.$(SOEXTVER00) $(DESTDIR)$(libdir)/libre2.so.$(SOEXTVER00); fi
 	ln -sf libre2.$(SOEXTVER00) $(DESTDIR)$(libdir)/libre2.$(SOEXTVER)
 	ln -sf libre2.$(SOEXTVER00) $(DESTDIR)$(libdir)/libre2.$(SOEXT)
 	$(INSTALL_DATA) re2.pc $(DESTDIR)$(libdir)/pkgconfig/re2.pc

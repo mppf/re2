@@ -26,7 +26,6 @@
 #include <iterator>
 #include <string>
 
-
 namespace re2 {
 
 class StringPiece {
