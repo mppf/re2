@@ -456,10 +456,11 @@ bool Regexp::Equal(Regexp* a, Regexp* b) {
         continue;
     }
 
-    int n = stk.size();
+    size_t n = stk.size();
     if (n == 0)
       break;
 
+    DCHECK_GE(n, 2);
     a = stk[n-2];
     b = stk[n-1];
     stk.resize(n-2);
@@ -680,7 +681,7 @@ bool Regexp::RequiredPrefix(string *prefix, bool *foldcase, Regexp** suffix) {
       }
       break;
   }
-  *foldcase = (sub[i]->parse_flags() & FoldCase);
+  *foldcase = (sub[i]->parse_flags() & FoldCase) != 0;
   i++;
 
   // The rest.

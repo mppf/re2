@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <string>
 #include <errno.h>
-#include "util/atomicops.h"
 #include "util/util.h"
 #include "util/flags.h"
 #include "util/sparse_array.h"
@@ -35,7 +34,7 @@ const VariadicFunction2<bool, StringPiece*, const RE2&, RE2::Arg, RE2::FindAndCo
 // This will trigger LNK2005 error in MSVC.
 #ifndef _MSC_VER
 const int RE2::Options::kDefaultMaxMem;  // initialized in re2.h
-#endif  // _MSC_VER
+#endif
 
 RE2::Options::Options(RE2::CannedOptions opt)
   : encoding_(opt == RE2::Latin1 ? EncodingLatin1 : EncodingUTF8),
@@ -293,8 +292,19 @@ int RE2::ProgramFanout(map<int, int>* histogram) const {
   return histogram->rbegin()->first;
 }
 
+// Returns num_captures_, computing it if needed, or -1 if the
+// regexp wasn't valid on construction.
+int RE2::NumberOfCapturingGroups() const {
+  MutexLock l(mutex_);
+  if (suffix_regexp_ == NULL)
+    return -1;
+  if (num_captures_ == -1)
+    num_captures_ = suffix_regexp_->NumCaptures();
+  return num_captures_;
+}
+
 // Returns named_groups_, computing it if needed.
-const map<string, int>&  RE2::NamedCapturingGroups() const {
+const map<string, int>& RE2::NamedCapturingGroups() const {
   MutexLock l(mutex_);
   if (!ok())
     return *empty_named_groups;
@@ -307,7 +317,7 @@ const map<string, int>&  RE2::NamedCapturingGroups() const {
 }
 
 // Returns group_names_, computing it if needed.
-const map<int, string>&  RE2::CapturingGroupNames() const {
+const map<int, string>& RE2::CapturingGroupNames() const {
   MutexLock l(mutex_);
   if (!ok())
     return *empty_group_names;
@@ -379,7 +389,7 @@ bool RE2::Replace(string *str,
   int nvec = 1 + MaxSubmatch(rewrite);
   if (nvec > arraysize(vec))
     return false;
-  if (!re.Match(*str, 0, str->size(), UNANCHORED, vec, nvec))
+  if (!re.Match(*str, 0, static_cast<int>(str->size()), UNANCHORED, vec, nvec))
     return false;
 
   string s;
@@ -406,7 +416,8 @@ int RE2::GlobalReplace(string *str,
   string out;
   int count = 0;
   while (p <= ep) {
-    if (!re.Match(*str, p - str->data(), str->size(), UNANCHORED, vec, nvec))
+    if (!re.Match(*str, static_cast<int>(p - str->data()),
+                  static_cast<int>(str->size()), UNANCHORED, vec, nvec))
       break;
     if (p < vec[0].begin())
       out.append(p, vec[0].begin() - p);
@@ -490,7 +501,7 @@ bool RE2::PossibleMatchRange(string* min, string* max, int maxlen) const {
   if (prog_ == NULL)
     return false;
 
-  int n = prefix_.size();
+  int n = static_cast<int>(prefix_.size());
   if (n > maxlen)
     n = maxlen;
 
@@ -603,7 +614,7 @@ bool RE2::Match(const StringPiece& text,
   if (!prefix_.empty()) {
     if (startpos != 0)
       return false;
-    prefixlen = prefix_.size();
+    prefixlen = static_cast<int>(prefix_.size());
     if (prefixlen > subtext.size())
       return false;
     if (prefix_foldcase_) {
@@ -980,8 +991,8 @@ bool RE2::DoMatch(const StringPiece& text,
     return false;
   }
 
-  if(consumed != NULL)
-    *consumed = vec[0].end() - text.begin();
+  if (consumed != NULL)
+    *consumed = static_cast<int>(vec[0].end() - text.begin());
 
   if (n == 0 || args == NULL) {
     // We are not interested in results
@@ -1046,20 +1057,6 @@ bool RE2::Rewrite(string *out, const StringPiece &rewrite,
     }
   }
   return true;
-}
-
-// Return the number of capturing subpatterns, or -1 if the
-// regexp wasn't valid on construction.
-int RE2::NumberOfCapturingGroups() const {
-  if (suffix_regexp_ == NULL)
-    return -1;
-  int n;
-  ATOMIC_LOAD_RELAXED(n, &num_captures_);
-  if (n == -1) {
-    n = suffix_regexp_->NumCaptures();
-    ATOMIC_STORE_RELAXED(&num_captures_, n);
-  }
-  return n;
 }
 
 // Checks that the rewrite string is well-formed with respect to this

@@ -6,8 +6,8 @@
 // TODO: Test extractions for PartialMatch/Consume
 
 #include <errno.h>
+#ifndef _MSC_VER
 #include <unistd.h>  /* for sysconf */
-#if defined(_POSIX_MAPPED_FILES) && _POSIX_MAPPED_FILES > 0
 #include <sys/mman.h>
 #endif
 #include <sys/stat.h>
@@ -176,7 +176,7 @@ TEST(RE2, Replace) {
     { "", NULL, NULL, NULL, NULL, 0 }
   };
 
-  for (const ReplaceTest *t = tests; t->original != NULL; ++t) {
+  for (const ReplaceTest* t = tests; t->original != NULL; t++) {
     VLOG(1) << StringPrintf("\"%s\" =~ s/%s/%s/g", t->original, t->regexp, t->rewrite);
     string one(t->original);
     CHECK(RE2::Replace(&one, t->regexp, t->rewrite));
@@ -369,12 +369,12 @@ TEST(RE2, Match) {
   CHECK_EQ(port, 9000);
 }
 
-static void TestRecursion(int size, const char *pattern) {
+static void TestRecursion(int size, const char* pattern) {
   // Fill up a string repeating the pattern given
   string domain;
   domain.resize(size);
-  int patlen = strlen(pattern);
-  for (int i = 0; i < size; ++i) {
+  size_t patlen = strlen(pattern);
+  for (int i = 0; i < size; i++) {
     domain[i] = pattern[i % patlen];
   }
   // Just make sure it doesn't crash due to too much recursion.
@@ -1410,12 +1410,56 @@ TEST(RE2, UnicodeClasses) {
 
 // Bug reported by saito. 2009/02/17
 TEST(RE2, NullVsEmptyString) {
-  RE2 re2(".*");
-  StringPiece v1("");
-  EXPECT_TRUE(RE2::FullMatch(v1, re2));
+  RE2 re(".*");
+  EXPECT_TRUE(re.ok());
 
-  StringPiece v2;
-  EXPECT_TRUE(RE2::FullMatch(v2, re2));
+  StringPiece null;
+  EXPECT_TRUE(RE2::FullMatch(null, re));
+
+  StringPiece empty("");
+  EXPECT_TRUE(RE2::FullMatch(empty, re));
+}
+
+// Similar to the previous test, check that the null string and the empty
+// string both match, but also that the null string can only provide null
+// submatches whereas the empty string can also provide empty submatches.
+TEST(RE2, NullVsEmptyStringSubmatches) {
+  RE2 re("()|(foo)");
+  EXPECT_TRUE(re.ok());
+
+  // matches[0] is overall match, [1] is (), [2] is (foo), [3] is nonexistent.
+  StringPiece matches[4];
+
+  for (int i = 0; i < arraysize(matches); i++)
+    matches[i] = "bar";
+
+  StringPiece null;
+  EXPECT_TRUE(re.Match(null, 0, null.size(), RE2::UNANCHORED,
+                       matches, arraysize(matches)));
+  for (int i = 0; i < arraysize(matches); i++) {
+    EXPECT_TRUE(matches[i] == NULL);
+    EXPECT_TRUE(matches[i].data() == NULL);  // always null
+    EXPECT_TRUE(matches[i] == "");
+  }
+
+  for (int i = 0; i < arraysize(matches); i++)
+    matches[i] = "bar";
+
+  StringPiece empty("");
+  EXPECT_TRUE(re.Match(empty, 0, empty.size(), RE2::UNANCHORED,
+                       matches, arraysize(matches)));
+  EXPECT_TRUE(matches[0] == NULL);
+  EXPECT_TRUE(matches[0].data() != NULL);  // empty, not null
+  EXPECT_TRUE(matches[0] == "");
+  EXPECT_TRUE(matches[1] == NULL);
+  EXPECT_TRUE(matches[1].data() != NULL);  // empty, not null
+  EXPECT_TRUE(matches[1] == "");
+  EXPECT_TRUE(matches[2] == NULL);
+  EXPECT_TRUE(matches[2].data() == NULL);
+  EXPECT_TRUE(matches[2] == "");
+  EXPECT_TRUE(matches[3] == NULL);
+  EXPECT_TRUE(matches[3].data() == NULL);
+  EXPECT_TRUE(matches[3] == "");
 }
 
 // Issue 1816809
@@ -1527,6 +1571,25 @@ TEST(RE2, Bug21371806) {
 
   RE2 re("g\\p{Zl}]", opt);
   CHECK(re.ok());
+}
+
+TEST(RE2, Bug26356109) {
+  // Bug in parser caused by factoring of common prefixes in alternations.
+
+  // In the past, this was factored to "a\\C*?[bc]". Thus, the automaton would
+  // consume "ab" and then stop (when unanchored) whereas it should consume all
+  // of "abc" as per first-match semantics.
+  RE2 re("a\\C*?c|a\\C*?b");
+  CHECK(re.ok());
+
+  string s = "abc";
+  StringPiece m;
+
+  CHECK(re.Match(s, 0, s.size(), RE2::UNANCHORED, &m, 1));
+  CHECK_EQ(m, s) << " (UNANCHORED) got m='" << m << "', want '" << s << "'";
+
+  CHECK(re.Match(s, 0, s.size(), RE2::ANCHOR_BOTH, &m, 1));
+  CHECK_EQ(m, s) << " (ANCHOR_BOTH) got m='" << m << "', want '" << s << "'";
 }
 
 }  // namespace re2

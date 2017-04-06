@@ -220,18 +220,25 @@ class SparseArray {
   // and at the beginning and end of all public non-const member functions.
   inline void DebugCheckInvariants() const;
 
+  static bool InitMemory() {
+#ifdef MEMORY_SANITIZER
+    return true;
+#else
+    return RunningOnValgrind();
+#endif
+  }
+
   int size_;
   int max_size_;
   int* sparse_to_dense_;
   vector<IndexValue> dense_;
-  bool valgrind_;
 
   DISALLOW_COPY_AND_ASSIGN(SparseArray);
 };
 
 template<typename Value>
 SparseArray<Value>::SparseArray()
-    : size_(0), max_size_(0), sparse_to_dense_(NULL), dense_(), valgrind_(RunningOnValgrind()) {}
+    : size_(0), max_size_(0), sparse_to_dense_(NULL), dense_() {}
 
 // IndexValue pairs: exposed in SparseArray::iterator.
 template<typename Value>
@@ -278,12 +285,23 @@ void SparseArray<Value>::resize(int new_max_size) {
     }
 
     if (sparse_to_dense_) {
-      memcpy(a, sparse_to_dense_, max_size_*sizeof a[0]);
+      memmove(a, sparse_to_dense_, max_size_*sizeof a[0]);
       delete[] sparse_to_dense_;
     }
     sparse_to_dense_ = a;
 
     dense_.resize(new_max_size);
+
+    // These don't need to be initialized for correctness,
+    // but Valgrind will warn about use of uninitialized memory,
+    // so initialize the new memory when compiling debug binaries.
+    // Initialize it to garbage to detect bugs in the future.
+    if (InitMemory()) {
+      for (int i = max_size_; i < new_max_size; i++) {
+        sparse_to_dense_[i] = 0xababababU;
+        dense_[i].index_ = 0xababababU;
+      }
+    }
   }
   max_size_ = new_max_size;
   if (size_ > max_size_)
@@ -420,10 +438,9 @@ void SparseArray<Value>::create_index(int i) {
 template<typename Value> SparseArray<Value>::SparseArray(int max_size) {
   max_size_ = max_size;
   sparse_to_dense_ = new int[max_size];
-  valgrind_ = RunningOnValgrind();
   dense_.resize(max_size);
   // Don't need to zero the new memory, but appease Valgrind.
-  if (valgrind_) {
+  if (InitMemory()) {
     for (int i = 0; i < max_size; i++) {
       sparse_to_dense_[i] = 0xababababU;
       dense_[i].index_ = 0xababababU;

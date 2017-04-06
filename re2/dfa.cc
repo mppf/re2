@@ -21,11 +21,11 @@
 //
 // See http://swtch.com/~rsc/regexp/ for a very bare-bones equivalent.
 
-#include "re2/prog.h"
-#include "re2/stringpiece.h"
 #include "util/atomicops.h"
 #include "util/flags.h"
 #include "util/sparse_set.h"
+#include "re2/prog.h"
+#include "re2/stringpiece.h"
 
 DEFINE_bool(re2_dfa_bail_when_slow, true,
             "Whether the RE2 DFA should bail out early "
@@ -94,7 +94,7 @@ class DFA {
   // States, linked by the next_ pointers.  If in state s and reading
   // byte c, the next state should be s->next_[c].
   struct State {
-    inline bool IsMatch() const { return flag_ & kFlagMatch; }
+    inline bool IsMatch() const { return (flag_ & kFlagMatch) != 0; }
     void SaveMatch(vector<int>* v);
 
     int* inst_;         // Instruction pointers in the state.
@@ -1015,7 +1015,7 @@ DFA::State* DFA::RunStateOnByte(State* state, int c) {
   // The state flag kFlagLastWord says whether the last
   // byte processed was a word character.  Use that info to
   // insert empty-width (non-)word boundaries.
-  bool islastword = state->flag_ & kFlagLastWord;
+  bool islastword = (state->flag_ & kFlagLastWord) != 0;
   bool isword = (c != kByteEndText && Prog::IsWordChar(static_cast<uint8>(c)));
   if (isword == islastword)
     beforeflag |= kEmptyNonWordBoundary;
@@ -1901,9 +1901,9 @@ bool Prog::SearchDFA(const StringPiece& text, const StringPiece& const_context,
   // as the beginning.
   if (match0) {
     if (reversed_)
-      *match0 = StringPiece(ep, text.end() - ep);
+      match0->set(ep, static_cast<int>(text.end() - ep));
     else
-      *match0 = StringPiece(text.begin(), ep - text.begin());
+      match0->set(text.begin(), static_cast<int>(ep - text.begin()));
   }
   return true;
 }
@@ -1939,7 +1939,7 @@ int DFA::BuildAllStates() {
     }
   }
 
-  return q.size();
+  return static_cast<int>(q.size());
 }
 
 // Build out all states in DFA for kind.  Returns number of states.

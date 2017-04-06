@@ -8,8 +8,8 @@
 # LDPCRE=-L/usr/local/lib -lpcre
 
 CXX?=g++
-CXXFLAGS?=-Wall -O3 -g -pthread # can override
-RE2_CXXFLAGS?=-Wsign-compare -c -I. $(CCPCRE)  # required
+CXXFLAGS?=-O3 -g -pthread  # can override
+RE2_CXXFLAGS?=-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -I. $(CCPCRE)  # required
 LDFLAGS?=-pthread
 AR?=ar
 ARFLAGS?=rsc
@@ -97,6 +97,7 @@ HFILES=\
 
 OFILES=\
 	obj/util/hash.o\
+	obj/util/logging.o\
 	obj/util/rune.o\
 	obj/util/stringprintf.o\
 	obj/util/strutil.o\
@@ -160,7 +161,7 @@ BIGTESTS=\
 	obj/test/random_test\
 
 SOFILES=$(patsubst obj/%,obj/so/%,$(OFILES))
-STESTOFILES=$(patsubst obj/%,obj/so/%,$(TESTOFILES))
+# We use TESTOFILES for testing the shared lib, only it is built differently.
 STESTS=$(patsubst obj/%,obj/so/%,$(TESTS))
 SBIGTESTS=$(patsubst obj/%,obj/so/%,$(BIGTESTS))
 
@@ -171,15 +172,15 @@ DBIGTESTS=$(patsubst obj/%,obj/dbg/%,$(BIGTESTS))
 
 obj/%.o: %.cc $(HFILES)
 	@mkdir -p $$(dirname $@)
-	$(CXX) -o $@ $(CPPFLAGS) $(CXXFLAGS) $(RE2_CXXFLAGS) -DNDEBUG $*.cc
+	$(CXX) -c -o $@ $(CPPFLAGS) $(CXXFLAGS) $(RE2_CXXFLAGS) -DNDEBUG $*.cc
 
 obj/dbg/%.o: %.cc $(HFILES)
 	@mkdir -p $$(dirname $@)
-	$(CXX) -o $@ -fPIC $(CPPFLAGS) $(CXXFLAGS) $(RE2_CXXFLAGS) $*.cc
+	$(CXX) -c -o $@ $(CPPFLAGS) $(CXXFLAGS) $(RE2_CXXFLAGS) $*.cc
 
 obj/so/%.o: %.cc $(HFILES)
 	@mkdir -p $$(dirname $@)
-	$(CXX) -o $@ -fPIC $(CPPFLAGS) $(CXXFLAGS) $(RE2_CXXFLAGS) -DNDEBUG $*.cc
+	$(CXX) -c -o $@ -fPIC $(CPPFLAGS) $(CXXFLAGS) $(RE2_CXXFLAGS) -DNDEBUG $*.cc
 
 obj/libre2.a: $(OFILES)
 	@mkdir -p obj
@@ -194,17 +195,18 @@ obj/so/libre2.$(SOEXT): $(SOFILES)
 	$(MAKE_SHARED_LIBRARY) -o obj/so/libre2.$(SOEXTVER) $(SOFILES)
 	ln -sf libre2.$(SOEXTVER) $@
 
-obj/test/%: obj/libre2.a obj/re2/testing/%.o $(TESTOFILES) obj/util/test.o
-	@mkdir -p obj/test
-	$(CXX) -o $@ obj/re2/testing/$*.o $(TESTOFILES) obj/util/test.o obj/libre2.a $(LDFLAGS) $(LDPCRE)
-
 obj/dbg/test/%: obj/dbg/libre2.a obj/dbg/re2/testing/%.o $(DTESTOFILES) obj/dbg/util/test.o
 	@mkdir -p obj/dbg/test
 	$(CXX) -o $@ obj/dbg/re2/testing/$*.o $(DTESTOFILES) obj/dbg/util/test.o obj/dbg/libre2.a $(LDFLAGS) $(LDPCRE)
 
-obj/so/test/%: obj/so/libre2.$(SOEXT) obj/libre2.a obj/so/re2/testing/%.o $(STESTOFILES) obj/so/util/test.o
+obj/test/%: obj/libre2.a obj/re2/testing/%.o $(TESTOFILES) obj/util/test.o
+	@mkdir -p obj/test
+	$(CXX) -o $@ obj/re2/testing/$*.o $(TESTOFILES) obj/util/test.o obj/libre2.a $(LDFLAGS) $(LDPCRE)
+
+# Test the shared lib, falling back to the static lib for private symbols
+obj/so/test/%: obj/so/libre2.$(SOEXT) obj/libre2.a obj/re2/testing/%.o $(TESTOFILES) obj/util/test.o
 	@mkdir -p obj/so/test
-	$(CXX) -o $@ obj/so/re2/testing/$*.o $(STESTOFILES) obj/so/util/test.o -Lobj/so -lre2 obj/libre2.a $(LDFLAGS) $(LDPCRE)
+	$(CXX) -o $@ obj/re2/testing/$*.o $(TESTOFILES) obj/util/test.o -Lobj/so -lre2 obj/libre2.a $(LDFLAGS) $(LDPCRE)
 
 obj/test/regexp_benchmark: obj/libre2.a obj/re2/testing/regexp_benchmark.o $(TESTOFILES) obj/util/benchmark.o
 	@mkdir -p obj/test

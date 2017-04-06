@@ -6,14 +6,23 @@
 cmake_minimum_required(VERSION 2.8.7)
 
 project(RE2 CXX)
+option(BUILD_SHARED_LIBS "build shared libraries" OFF)
+option(USEPCRE "use PCRE in tests and benchmarks" OFF)
+
+set(EXTRA_TARGET_LINK_LIBRARIES)
 
 if(WIN32)
   add_definitions(-DUNICODE -D_UNICODE -DSTRICT -DNOMINMAX)
   set(THREADING threadwin)
-  set(EXTRA_TARGET_LINK_LIBRARIES)
 else()
+  add_definitions(-pthread)
   set(THREADING thread)
-  set(EXTRA_TARGET_LINK_LIBRARIES -pthread)
+  list(APPEND EXTRA_TARGET_LINK_LIBRARIES -pthread)
+endif()
+
+if(USEPCRE)
+  add_definitions(-DUSEPCRE)
+  list(APPEND EXTRA_TARGET_LINK_LIBRARIES pcre)
 endif()
 
 include_directories(${CMAKE_SOURCE_DIR})
@@ -40,13 +49,14 @@ set(RE2_LIBRARY_SOURCES
     re2/unicode_casefold.cc
     re2/unicode_groups.cc
     util/hash.cc
+    util/logging.cc
     util/rune.cc
     util/stringprintf.cc
     util/strutil.cc
     util/valgrind.cc
     )
 
-add_library(re2 STATIC ${RE2_LIBRARY_SOURCES})
+add_library(re2 ${RE2_LIBRARY_SOURCES})
 
 set(TEST_LIBRARY_SOURCES
     re2/testing/backtrack.cc
