@@ -39,7 +39,7 @@ if(USEPCRE)
   list(APPEND EXTRA_TARGET_LINK_LIBRARIES pcre)
 endif()
 
-include_directories(${CMAKE_SOURCE_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 set(RE2_SOURCES
     re2/bitstate.cc
@@ -128,4 +128,4 @@ set(RE2_HEADERS
     )
 
 install(FILES ${RE2_HEADERS} DESTINATION include/re2)
-install(TARGETS re2 ARCHIVE DESTINATION lib LIBRARY DESTINATION lib)
+install(TARGETS re2 ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)

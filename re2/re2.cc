@@ -403,7 +403,13 @@ int RE2::GlobalReplace(string *str,
   const char* lastend = NULL;
   string out;
   int count = 0;
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+  // Iterate just once when fuzzing. Otherwise, we easily get bogged down
+  // and coverage is unlikely to improve despite significant expense.
+  while (p == str->data()) {
+#else
   while (p <= ep) {
+#endif
     if (!re.Match(*str, static_cast<size_t>(p - str->data()),
                   str->size(), UNANCHORED, vec, nvec))
       break;
@@ -790,7 +796,7 @@ bool RE2::Match(const StringPiece& text,
 
   // Zero submatches that don't exist in the regexp.
   for (int i = ncap; i < nsubmatch; i++)
-    submatch[i] = NULL;
+    submatch[i] = StringPiece();
   return true;
 }
 

@@ -463,6 +463,10 @@ class Regexp {
   // Computes whether Regexp is already simple.
   bool ComputeSimple();
 
+  // Constructor that generates a Star, Plus or Quest,
+  // squashing the pair if sub is also a Star, Plus or Quest.
+  static Regexp* StarPlusOrQuest(RegexpOp op, Regexp* sub, ParseFlags flags);
+
   // Constructor that generates a concatenation or alternation,
   // enforcing the limit on the number of subexpressions for
   // a particular Regexp.
@@ -531,7 +535,7 @@ class Regexp {
   // exponential blowup in space requirements.
   // uint16_t to control space usage.
   // The standard regexp routines will never generate a
-  // ref greater than the maximum repeat count (1000),
+  // ref greater than the maximum repeat count (kMaxRepeat),
   // but even so, Incref and Decref consult an overflow map
   // when ref_ reaches kMaxRef.
   uint16_t ref_;

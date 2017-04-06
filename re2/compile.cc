@@ -10,8 +10,7 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <sys/types.h>
-#include <map>
+#include <unordered_map>
 #include <utility>
 
 #include "util/logging.h"
@@ -246,7 +245,7 @@ class Compiler : public Regexp::Walker<Frag> {
 
   int64_t max_mem_;    // Total memory budget.
 
-  std::map<uint64_t, int> rune_cache_;
+  std::unordered_map<uint64_t, int> rune_cache_;
   Frag rune_range_;
 
   RE2::Anchor anchor_;  // anchor mode for RE2::Set
@@ -496,7 +495,7 @@ static uint64_t MakeRuneCacheKey(uint8_t lo, uint8_t hi, bool foldcase,
 int Compiler::CachedRuneByteSuffix(uint8_t lo, uint8_t hi, bool foldcase,
                                    int next) {
   uint64_t key = MakeRuneCacheKey(lo, hi, foldcase, next);
-  std::map<uint64_t, int>::const_iterator it = rune_cache_.find(key);
+  std::unordered_map<uint64_t, int>::const_iterator it = rune_cache_.find(key);
   if (it != rune_cache_.end())
     return it->second;
   int id = UncachedRuneByteSuffix(lo, hi, foldcase, next);
@@ -1211,7 +1210,7 @@ Prog* Compiler::Finish() {
   if (max_mem_ <= 0) {
     prog_->set_dfa_mem(1<<20);
   } else {
-    int64_t m = max_mem_ - sizeof(Prog) - inst_len_*sizeof(Prog::Inst);
+    int64_t m = max_mem_ - sizeof(Prog) - prog_->size_*sizeof(Prog::Inst);
     if (m < 0)
       m = 0;
     prog_->set_dfa_mem(m);

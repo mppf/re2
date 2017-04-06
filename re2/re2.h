@@ -181,7 +181,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <sys/types.h>
 #include <algorithm>
 #include <map>
 #include <mutex>
@@ -905,6 +904,14 @@ MAKE_INTEGER_PARSER(unsigned long long, ulonglong)
 #undef MAKE_INTEGER_PARSER
 
 #ifndef SWIG
+
+// Silence warnings about missing initializers for members of LazyRE2.
+// Note that we test for Clang first because it defines __GNUC__ as well.
+#if defined(__clang__)
+#elif defined(__GNUC__) && __GNUC__ >= 6
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+
 // Helper for writing global or static RE2s safely.
 // Write
 //     static LazyRE2 re = {".*"};

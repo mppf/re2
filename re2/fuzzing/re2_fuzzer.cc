@@ -20,10 +20,17 @@ void Test(StringPiece pattern, const RE2::Options& options, StringPiece text) {
   if (!re.ok())
     return;
 
+  // Don't waste time fuzzing high-size programs.
+  // (They can cause bug reports due to fuzzer timeouts.)
+  int size = re.ProgramSize();
+  if (size > 9999)
+    return;
+
   // Don't waste time fuzzing high-fanout programs.
+  // (They can also cause bug reports due to fuzzer timeouts.)
   std::map<int, int> histogram;
   int fanout = re.ProgramFanout(&histogram);
-  if (fanout > 10)
+  if (fanout > 9)
     return;
 
   StringPiece sp1, sp2, sp3, sp4;
@@ -49,7 +56,7 @@ void Test(StringPiece pattern, const RE2::Options& options, StringPiece text) {
 
 // Entry point for libFuzzer.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  if (size == 0 || size > 1000000)
+  if (size == 0 || size > 1024)
     return 0;
 
   // The one-at-a-time hash by Bob Jenkins.
@@ -84,16 +91,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   StringPiece pattern(ptr, len);
   StringPiece text(ptr, len);
   Test(pattern, options, text);
-
-  for (int i = 2; i <= 4; i++) {
-    if (len < i)
-      break;
-
-    int frac = len / i;
-    pattern = StringPiece(ptr, frac);
-    text = StringPiece(ptr + frac, len - frac);
-    Test(pattern, options, text);
-  }
 
   return 0;
 }

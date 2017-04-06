@@ -42,6 +42,13 @@
 
 namespace re2 {
 
+// Reduce the maximum repeat count by an order of magnitude when fuzzing.
+#ifdef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+static const int kMaxRepeat = 100;
+#else
+static const int kMaxRepeat = 1000;
+#endif
+
 // Regular expression parse state.
 // The list of parsed regexps so far is maintained as a vector of
 // Regexp pointers called the stack.  Left parenthesis and vertical
@@ -473,6 +480,23 @@ bool Regexp::ParseState::PushRepeatOp(RegexpOp op, const StringPiece& s,
   Regexp::ParseFlags fl = flags_;
   if (nongreedy)
     fl = fl ^ NonGreedy;
+
+  // Squash **, ++ and ??. Regexp::Star() et al. handle this too, but
+  // they're mostly for use during simplification, not during parsing.
+  if (op == stacktop_->op() && fl == stacktop_->parse_flags())
+    return true;
+
+  // Squash *+, *?, +*, +?, ?* and ?+. They all squash to *, so because
+  // op is a repeat, we just have to check that stacktop_->op() is too,
+  // then adjust stacktop_.
+  if ((stacktop_->op() == kRegexpStar ||
+       stacktop_->op() == kRegexpPlus ||
+       stacktop_->op() == kRegexpQuest) &&
+      fl == stacktop_->parse_flags()) {
+    stacktop_->op_ = kRegexpStar;
+    return true;
+  }
+
   Regexp* re = new Regexp(op, fl);
   re->AllocSub(1);
   re->down_ = stacktop_->down_;
@@ -541,7 +565,7 @@ int RepetitionWalker::ShortVisit(Regexp* re, int parent_arg) {
 bool Regexp::ParseState::PushRepetition(int min, int max,
                                         const StringPiece& s,
                                         bool nongreedy) {
-  if ((max != -1 && max < min) || min > 1000 || max > 1000) {
+  if ((max != -1 && max < min) || min > kMaxRepeat || max > kMaxRepeat) {
     status_->set_code(kRegexpRepeatSize);
     status_->set_error_arg(s);
     return false;
@@ -564,7 +588,7 @@ bool Regexp::ParseState::PushRepetition(int min, int max,
   stacktop_ = re;
   if (min >= 2 || max >= 2) {
     RepetitionWalker w;
-    if (w.Walk(stacktop_, 1000) == 0) {
+    if (w.Walk(stacktop_, kMaxRepeat) == 0) {
       status_->set_code(kRegexpRepeatSize);
       status_->set_error_arg(s);
       return false;
@@ -1289,7 +1313,7 @@ static int StringPieceToRune(Rune *r, StringPiece *sp, RegexpStatus* status) {
   }
 
   status->set_code(kRegexpBadUTF8);
-  status->set_error_arg(NULL);
+  status->set_error_arg(StringPiece());
   return -1;
 }
 
@@ -1333,12 +1357,12 @@ static bool ParseEscape(StringPiece* s, Rune* rp,
   if (s->size() < 1 || (*s)[0] != '\\') {
     // Should not happen - caller always checks.
     status->set_code(kRegexpInternalError);
-    status->set_error_arg(NULL);
+    status->set_error_arg(StringPiece());
     return false;
   }
   if (s->size() < 2) {
     status->set_code(kRegexpTrailingBackslash);
-    status->set_error_arg(NULL);
+    status->set_error_arg(StringPiece());
     return false;
   }
   Rune c, c1;
@@ -1793,7 +1817,7 @@ bool Regexp::ParseState::ParseCharClass(StringPiece* s,
   if (s->size() == 0 || (*s)[0] != '[') {
     // Caller checked this.
     status->set_code(kRegexpInternalError);
-    status->set_error_arg(NULL);
+    status->set_error_arg(StringPiece());
     return false;
   }
   bool negated = false;
@@ -2108,9 +2132,9 @@ Regexp* Regexp::Parse(const StringPiece& s, ParseFlags global_flags,
     return ps.DoFinish();
   }
 
-  StringPiece lastunary = NULL;
+  StringPiece lastunary = StringPiece();
   while (t.size() > 0) {
-    StringPiece isunary = NULL;
+    StringPiece isunary = StringPiece();
     switch (t[0]) {
       default: {
         Rune r;
@@ -2133,7 +2157,7 @@ Regexp* Regexp::Parse(const StringPiece& s, ParseFlags global_flags,
           if (!ps.DoLeftParenNoCapture())
             return NULL;
         } else {
-          if (!ps.DoLeftParen(NULL))
+          if (!ps.DoLeftParen(StringPiece()))
             return NULL;
         }
         t.remove_prefix(1);  // '('
