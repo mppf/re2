@@ -16,7 +16,16 @@
 // and recognizes the Perl escape sequences \d, \s, \w, \D, \S, and \W.
 // See regexp.h for rationale.
 
+#include <ctype.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include <algorithm>
+#include <map>
+#include <string>
+
 #include "util/util.h"
+#include "util/strutil.h"
 #include "re2/regexp.h"
 #include "re2/stringpiece.h"
 #include "re2/unicode_casefold.h"
@@ -284,7 +293,7 @@ Rune ApplyFold(const CaseFold *f, Rune r) {
     case EvenOddSkip:  // even <-> odd but only applies to every other
       if ((r - f->lo) % 2)
         return r;
-      // fall through
+      FALLTHROUGH_INTENDED;
     case EvenOdd:  // even <-> odd
       if (r%2 == 0)
         return r + 1;
@@ -293,7 +302,7 @@ Rune ApplyFold(const CaseFold *f, Rune r) {
     case OddEvenSkip:  // odd <-> even but only applies to every other
       if ((r - f->lo) % 2)
         return r;
-      // fall through
+      FALLTHROUGH_INTENDED;
     case OddEven:  // odd <-> even
       if (r%2 == 1)
         return r + 1;
@@ -346,7 +355,7 @@ static void AddFoldedRange(CharClassBuilder* cc, Rune lo, Rune hi, int depth) {
     // Add in the result of folding the range lo - f->hi
     // and that range's fold, recursively.
     Rune lo1 = lo;
-    Rune hi1 = min<Rune>(hi, f->hi);
+    Rune hi1 = std::min<Rune>(hi, f->hi);
     switch (f->delta) {
       default:
         lo1 += f->delta;
@@ -1176,7 +1185,7 @@ bool Regexp::ParseState::MaybeConcatString(int r, ParseFlags flags) {
   if (r >= 0) {
     re1->op_ = kRegexpLiteral;
     re1->rune_ = r;
-    re1->parse_flags_ = static_cast<uint16>(flags);
+    re1->parse_flags_ = static_cast<uint16_t>(flags);
     return true;
   }
 
@@ -1354,7 +1363,7 @@ static bool ParseEscape(StringPiece* s, Rune* rp,
       // Single non-zero octal digit is a backreference; not supported.
       if (s->size() == 0 || (*s)[0] < '0' || (*s)[0] > '7')
         goto BadEscape;
-      // fall through
+      FALLTHROUGH_INTENDED;
     case '0':
       // consume up to three octal digits; already have one.
       code = c - '0';

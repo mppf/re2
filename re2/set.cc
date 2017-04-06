@@ -4,13 +4,15 @@
 
 #include "re2/set.h"
 
+#include <stddef.h>
+
 #include "util/util.h"
 #include "re2/stringpiece.h"
 #include "re2/prog.h"
 #include "re2/re2.h"
 #include "re2/regexp.h"
 
-using namespace re2;
+namespace re2 {
 
 RE2::Set::Set(const RE2::Options& options, RE2::Anchor anchor) {
   options_.Copy(options);
@@ -91,7 +93,7 @@ bool RE2::Set::Compile() {
   return prog_ != NULL;
 }
 
-bool RE2::Set::Match(const StringPiece& text, vector<int>* v) const {
+bool RE2::Set::Match(const StringPiece& text, std::vector<int>* v) const {
   if (!compiled_) {
     LOG(DFATAL) << "RE2::Set::Match without Compile";
     return false;
@@ -112,3 +114,5 @@ bool RE2::Set::Match(const StringPiece& text, vector<int>* v) const {
   }
   return true;
 }
+
+}  // namespace re2

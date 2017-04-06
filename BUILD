@@ -11,6 +11,7 @@ exports_files(["LICENSE"])
 cc_library(
     name = "re2",
     srcs = [
+        "re2/bitmap256.h",
         "re2/bitstate.cc",
         "re2/compile.cc",
         "re2/dfa.cc",
@@ -39,19 +40,17 @@ cc_library(
         "re2/unicode_groups.h",
         "re2/walker-inl.h",
         "util/flags.h",
-        "util/hash.cc",
         "util/logging.cc",
         "util/logging.h",
+        "util/mix.h",
         "util/mutex.h",
         "util/rune.cc",
         "util/sparse_array.h",
         "util/sparse_set.h",
-        "util/stringprintf.cc",
         "util/strutil.cc",
+        "util/strutil.h",
         "util/utf.h",
         "util/util.h",
-        "util/valgrind.cc",
-        "util/valgrind.h",
     ],
     hdrs = [
         "re2/filtered_re2.h",
@@ -76,8 +75,6 @@ cc_library(
         "re2/testing/string_generator.cc",
         "re2/testing/tester.cc",
         "util/pcre.cc",
-        "util/random.cc",
-        "util/thread.cc",
     ],
     hdrs = [
         "re2/testing/exhaustive_tester.h",
@@ -86,9 +83,7 @@ cc_library(
         "re2/testing/tester.h",
         "util/benchmark.h",
         "util/pcre.h",
-        "util/random.h",
         "util/test.h",
-        "util/thread.h",
     ],
     deps = [":re2"],
 )

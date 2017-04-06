@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#ifndef RE2_TESTING_TESTER_H_
+#define RE2_TESTING_TESTER_H_
+
 // Comparative tester for regular expression matching.
 // Checks all implementations against each other.
 
-#ifndef RE2_TESTING_TESTER_H__
-#define RE2_TESTING_TESTER_H__
+#include <vector>
 
 #include "re2/stringpiece.h"
 #include "re2/prog.h"
@@ -15,8 +17,6 @@
 #include "util/pcre.h"
 
 namespace re2 {
-
-class Regexp;
 
 // All the supported regexp engines.
 enum Engine {
@@ -108,7 +108,7 @@ class Tester {
 
  private:
   bool error_;
-  vector<TestInstance*> v_;
+  std::vector<TestInstance*> v_;
 
   DISALLOW_COPY_AND_ASSIGN(Tester);
 };
@@ -118,4 +118,4 @@ bool TestRegexpOnText(const StringPiece& regexp, const StringPiece& text);
 
 }  // namespace re2
 
-#endif  // RE2_TESTING_TESTER_H__
+#endif  // RE2_TESTING_TESTER_H_

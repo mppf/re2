@@ -5,7 +5,11 @@
 // Format a regular expression structure as a string.
 // Tested by parse_test.cc
 
+#include <string.h>
+#include <string>
+
 #include "util/util.h"
+#include "util/strutil.h"
 #include "re2/regexp.h"
 #include "re2/walker-inl.h"
 

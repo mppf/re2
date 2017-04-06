@@ -5,21 +5,30 @@
 // Compiled regular expression representation.
 // Tested by compile_test.cc
 
-#include "util/util.h"
 #include "re2/prog.h"
+
+#include <stdint.h>
+#include <string.h>
+#include <algorithm>
+#include <memory>
+#include <utility>
+
+#include "util/util.h"
+#include "util/strutil.h"
+#include "re2/bitmap256.h"
 #include "re2/stringpiece.h"
 
 namespace re2 {
 
 // Constructors per Inst opcode
 
-void Prog::Inst::InitAlt(uint32 out, uint32 out1) {
+void Prog::Inst::InitAlt(uint32_t out, uint32_t out1) {
   DCHECK_EQ(out_opcode_, 0);
   set_out_opcode(out, kInstAlt);
   out1_ = out1;
 }
 
-void Prog::Inst::InitByteRange(int lo, int hi, int foldcase, uint32 out) {
+void Prog::Inst::InitByteRange(int lo, int hi, int foldcase, uint32_t out) {
   DCHECK_EQ(out_opcode_, 0);
   set_out_opcode(out, kInstByteRange);
   lo_ = lo & 0xFF;
@@ -27,25 +36,25 @@ void Prog::Inst::InitByteRange(int lo, int hi, int foldcase, uint32 out) {
   foldcase_ = foldcase & 0xFF;
 }
 
-void Prog::Inst::InitCapture(int cap, uint32 out) {
+void Prog::Inst::InitCapture(int cap, uint32_t out) {
   DCHECK_EQ(out_opcode_, 0);
   set_out_opcode(out, kInstCapture);
   cap_ = cap;
 }
 
-void Prog::Inst::InitEmptyWidth(EmptyOp empty, uint32 out) {
+void Prog::Inst::InitEmptyWidth(EmptyOp empty, uint32_t out) {
   DCHECK_EQ(out_opcode_, 0);
   set_out_opcode(out, kInstEmptyWidth);
   empty_ = empty;
 }
 
-void Prog::Inst::InitMatch(int32 id) {
+void Prog::Inst::InitMatch(int32_t id) {
   DCHECK_EQ(out_opcode_, 0);
   set_opcode(kInstMatch);
   match_id_ = id;
 }
 
-void Prog::Inst::InitNop(uint32 out) {
+void Prog::Inst::InitNop(uint32_t out) {
   DCHECK_EQ(out_opcode_, 0);
   set_opcode(kInstNop);
 }
@@ -101,13 +110,12 @@ Prog::Prog()
     bytemap_range_(0),
     first_byte_(-1),
     flags_(0),
-    onepass_statesize_(0),
+    list_count_(0),
     inst_(NULL),
+    onepass_nodes_(NULL),
     dfa_first_(NULL),
     dfa_longest_(NULL),
-    dfa_mem_(0),
-    onepass_nodes_(NULL),
-    onepass_start_(NULL) {
+    dfa_mem_(0) {
 }
 
 Prog::~Prog() {
@@ -280,7 +288,7 @@ static bool IsMatch(Prog* prog, Prog::Inst* ip) {
 }
 
 template<typename StrPiece>
-uint32 Prog::EmptyFlags(const StrPiece& text, typename StrPiece::ptr_rd_type p) {
+uint32_t Prog::EmptyFlags(const StrPiece& text, typename StrPiece::ptr_rd_type p) {
   int flags = 0;
 
   // ^ and \A
@@ -320,58 +328,135 @@ uint32 Prog::EmptyFlags<StringPiece>(const StringPiece& text, const char* p);
 template
 uint32 Prog::EmptyFlags<FilePiece>(const FilePiece& text, FilePiece::ptr_rd_type p);
 
+// ByteMapBuilder implements a coloring algorithm.
+//
+// The first phase is a series of "mark and merge" batches: we mark one or more
+// [lo-hi] ranges, then merge them into our internal state. Batching is not for
+// performance; rather, it means that the ranges are treated indistinguishably.
+//
+// Internally, the ranges are represented using a bitmap that stores the splits
+// and a vector that stores the colors; both of them are indexed by the ranges'
+// last bytes. Thus, in order to merge a [lo-hi] range, we split at lo-1 and at
+// hi (if not already split), then recolor each range in between. The color map
+// (i.e. from the old color to the new color) is maintained for the lifetime of
+// the batch and so underpins this somewhat obscure approach to set operations.
+//
+// The second phase builds the bytemap from our internal state: we recolor each
+// range, then store the new color (which is now the byte class) in each of the
+// corresponding array elements. Finally, we output the number of byte classes.
 class ByteMapBuilder {
  public:
   ByteMapBuilder() {
-    for (int i = 0; i < arraysize(words_); i++)
-      words_[i] = 0;
+    // Initial state: the [0-255] range has color 256.
+    // This will avoid problems during the second phase,
+    // in which we assign byte classes numbered from 0.
+    splits_.Set(255);
+    colors_.resize(256);
+    colors_[255] = 256;
+    nextcolor_ = 257;
   }
 
-  void Mark(int lo, int hi) {
-    DCHECK_GE(lo, 0);
-    DCHECK_GE(hi, 0);
-    DCHECK_LE(lo, 255);
-    DCHECK_LE(hi, 255);
-    DCHECK_LE(lo, hi);
-
-    lo--;
-
-    if (0 <= lo)
-      Set(lo);
-    Set(hi);
-  }
-
-  int Build(uint8* bytemap) {
-    uint8 b = 0;
-    uint64 word = 0;
-    for (int c = 0; c < 256; c++) {
-      if ((c & 63) == 0)
-        word = words_[c >> 6];
-      bytemap[c] = b;
-      b += word & 1;
-      word >>= 1;
-    }
-    return bytemap[255] + 1;
-  }
+  void Mark(int lo, int hi);
+  void Merge();
+  void Build(uint8_t* bytemap, int* bytemap_range);
 
  private:
-  bool Get(int c) const {
-    return words_[c >> 6] & (1ULL << (c & 63));
-  }
+  int Recolor(int oldcolor);
 
-  void Set(int c) {
-    words_[c >> 6] |= 1ULL << (c & 63);
-  }
-
-  uint64 words_[4];
+  Bitmap256 splits_;
+  std::vector<int> colors_;
+  int nextcolor_;
+  std::vector<std::pair<int, int>> colormap_;
+  std::vector<std::pair<int, int>> ranges_;
 
   DISALLOW_COPY_AND_ASSIGN(ByteMapBuilder);
 };
 
+void ByteMapBuilder::Mark(int lo, int hi) {
+  DCHECK_GE(lo, 0);
+  DCHECK_GE(hi, 0);
+  DCHECK_LE(lo, 255);
+  DCHECK_LE(hi, 255);
+  DCHECK_LE(lo, hi);
+
+  // Ignore any [0-255] ranges. They cause us to recolor every range, which
+  // has no effect on the eventual result and is therefore a waste of time.
+  if (lo == 0 && hi == 255)
+    return;
+
+  ranges_.emplace_back(lo, hi);
+}
+
+void ByteMapBuilder::Merge() {
+  for (std::vector<std::pair<int, int>>::const_iterator it = ranges_.begin();
+       it != ranges_.end();
+       ++it) {
+    int lo = it->first-1;
+    int hi = it->second;
+
+    if (0 <= lo && !splits_.Test(lo)) {
+      splits_.Set(lo);
+      int next = splits_.FindNextSetBit(lo+1);
+      colors_[lo] = colors_[next];
+    }
+    if (!splits_.Test(hi)) {
+      splits_.Set(hi);
+      int next = splits_.FindNextSetBit(hi+1);
+      colors_[hi] = colors_[next];
+    }
+
+    int c = lo+1;
+    while (c < 256) {
+      int next = splits_.FindNextSetBit(c);
+      colors_[next] = Recolor(colors_[next]);
+      if (next == hi)
+        break;
+      c = next+1;
+    }
+  }
+  colormap_.clear();
+  ranges_.clear();
+}
+
+void ByteMapBuilder::Build(uint8_t* bytemap, int* bytemap_range) {
+  // Assign byte classes numbered from 0.
+  nextcolor_ = 0;
+
+  int c = 0;
+  while (c < 256) {
+    int next = splits_.FindNextSetBit(c);
+    uint8_t b = static_cast<uint8_t>(Recolor(colors_[next]));
+    while (c <= next) {
+      bytemap[c] = b;
+      c++;
+    }
+  }
+
+  *bytemap_range = nextcolor_;
+}
+
+int ByteMapBuilder::Recolor(int oldcolor) {
+  // Yes, this is a linear search. There can be at most 256
+  // colors and there will typically be far fewer than that.
+  // Also, we need to consider keys *and* values in order to
+  // avoid recoloring a given range more than once per batch.
+  std::vector<std::pair<int, int>>::const_iterator it =
+      std::find_if(colormap_.begin(), colormap_.end(),
+                   [=](const std::pair<int, int>& kv) -> bool {
+                     return kv.first == oldcolor || kv.second == oldcolor;
+                   });
+  if (it != colormap_.end())
+    return it->second;
+  int newcolor = nextcolor_;
+  nextcolor_++;
+  colormap_.emplace_back(oldcolor, newcolor);
+  return newcolor;
+}
+
 void Prog::ComputeByteMap() {
-  // Fill in byte map with byte classes for the program.
+  // Fill in bytemap with byte classes for the program.
   // Ranges of bytes that are treated indistinguishably
-  // are mapped to a single byte class.
+  // will be mapped to a single byte class.
   ByteMapBuilder builder;
 
   // Don't repeat the work for ^ and $.
@@ -386,40 +471,56 @@ void Prog::ComputeByteMap() {
       int hi = ip->hi();
       builder.Mark(lo, hi);
       if (ip->foldcase() && lo <= 'z' && hi >= 'a') {
-        if (lo < 'a')
-          lo = 'a';
-        if (hi > 'z')
-          hi = 'z';
-        if (lo <= hi)
-          builder.Mark(lo + 'A' - 'a', hi + 'A' - 'a');
+        int foldlo = lo;
+        int foldhi = hi;
+        if (foldlo < 'a')
+          foldlo = 'a';
+        if (foldhi > 'z')
+          foldhi = 'z';
+        if (foldlo <= foldhi)
+          builder.Mark(foldlo + 'A' - 'a', foldhi + 'A' - 'a');
       }
+      // If this Inst is not the last Inst in its list AND the next Inst is
+      // also a ByteRange AND the Insts have the same out, defer the merge.
+      if (!ip->last() &&
+          inst(id+1)->opcode() == kInstByteRange &&
+          ip->out() == inst(id+1)->out())
+        continue;
+      builder.Merge();
     } else if (ip->opcode() == kInstEmptyWidth) {
       if (ip->empty() & (kEmptyBeginLine|kEmptyEndLine) &&
           !marked_line_boundaries) {
         builder.Mark('\n', '\n');
+        builder.Merge();
         marked_line_boundaries = true;
       }
       if (ip->empty() & (kEmptyWordBoundary|kEmptyNonWordBoundary) &&
           !marked_word_boundaries) {
-        int j;
-        for (int i = 0; i < 256; i = j) {
-          for (j = i + 1; j < 256 &&
-                          Prog::IsWordChar(static_cast<uint8>(i)) ==
-                              Prog::IsWordChar(static_cast<uint8>(j));
-               j++)
-            ;
-          builder.Mark(i, j - 1);
+        // We require two batches here: the first for ranges that are word
+        // characters, the second for ranges that are not word characters.
+        for (bool isword : {true, false}) {
+          int j;
+          for (int i = 0; i < 256; i = j) {
+            for (j = i + 1; j < 256 &&
+                            Prog::IsWordChar(static_cast<uint8_t>(i)) ==
+                                Prog::IsWordChar(static_cast<uint8_t>(j));
+                 j++)
+              ;
+            if (Prog::IsWordChar(static_cast<uint8_t>(i)) == isword)
+              builder.Mark(i, j - 1);
+          }
+          builder.Merge();
         }
         marked_word_boundaries = true;
       }
     }
   }
 
-  bytemap_range_ = builder.Build(bytemap_);
+  builder.Build(bytemap_, &bytemap_range_);
 
-  if (0) {  // For debugging: use trivial byte map.
+  if (0) {  // For debugging: use trivial bytemap.
     for (int i = 0; i < 256; i++)
-      bytemap_[i] = static_cast<uint8>(i);
+      bytemap_[i] = static_cast<uint8_t>(i);
     bytemap_range_ = 256;
     LOG(INFO) << "Using trivial bytemap.";
   }
@@ -433,7 +534,7 @@ void Prog::Flatten() {
   // Scratch structures. It's important that these are reused by EmitList()
   // because we call it in a loop and it would thrash the heap otherwise.
   SparseSet q(size());
-  vector<int> stk;
+  std::vector<int> stk;
   stk.reserve(size());
 
   // First pass: Marks "roots".
@@ -443,8 +544,8 @@ void Prog::Flatten() {
 
   // Second pass: Emits "lists". Remaps outs to root-ids.
   // Builds the mapping from root-ids to flat-ids.
-  vector<int> flatmap(rootmap.size());
-  vector<Inst> flat;
+  std::vector<int> flatmap(rootmap.size());
+  std::vector<Inst> flat;
   flat.reserve(size());
   for (SparseArray<int>::const_iterator i = rootmap.begin();
        i != rootmap.end();
@@ -490,8 +591,8 @@ void Prog::Flatten() {
   memmove(inst_, flat.data(), size_ * sizeof *inst_);
 }
 
-void Prog::MarkRoots(SparseArray<int>* rootmap,
-                     SparseSet* q, vector<int>* stk) {
+void Prog::MarkRoots(SparseArray<int>* rootmap, SparseSet* q,
+                     std::vector<int>* stk) {
   // Mark the kInstFail instruction.
   rootmap->set_new(0, rootmap->size());
 
@@ -544,8 +645,9 @@ void Prog::MarkRoots(SparseArray<int>* rootmap,
   }
 }
 
-void Prog::EmitList(int root, SparseArray<int>* rootmap, vector<Inst>* flat,
-                    SparseSet* q, vector<int>* stk) {
+void Prog::EmitList(int root, SparseArray<int>* rootmap,
+                    std::vector<Inst>* flat, SparseSet* q,
+                    std::vector<int>* stk) {
   q->clear();
   stk->clear();
   stk->push_back(root);
@@ -576,8 +678,8 @@ void Prog::EmitList(int root, SparseArray<int>* rootmap, vector<Inst>* flat,
         flat->emplace_back();
         flat->back().set_opcode(kInstAltMatch);
         flat->back().set_out(static_cast<int>(flat->size()));
-        flat->back().out1_ = static_cast<uint32>(flat->size())+1;
-        // Fall through.
+        flat->back().out1_ = static_cast<uint32_t>(flat->size())+1;
+        FALLTHROUGH_INTENDED;
 
       case kInstAlt:
         stk->push_back(ip->out1());

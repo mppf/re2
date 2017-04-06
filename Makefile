@@ -82,16 +82,16 @@ HFILES=\
 	util/benchmark.h\
 	util/flags.h\
 	util/logging.h\
+	util/mix.h\
 	util/mutex.h\
 	util/pcre.h\
-	util/random.h\
 	util/sparse_array.h\
 	util/sparse_set.h\
+	util/strutil.h\
 	util/test.h\
-	util/thread.h\
 	util/utf.h\
 	util/util.h\
-	util/valgrind.h\
+	re2/bitmap256.h\
 	re2/file_strings.h\
 	re2/filtered_re2.h\
 	re2/prefilter.h\
@@ -110,12 +110,9 @@ HFILES=\
 	re2/walker-inl.h\
 
 OFILES=\
-	obj/util/hash.o\
 	obj/util/logging.o\
 	obj/util/rune.o\
-	obj/util/stringprintf.o\
 	obj/util/strutil.o\
-	obj/util/valgrind.o\
 	obj/re2/bitstate.o\
 	obj/re2/compile.o\
 	obj/re2/dfa.o\
@@ -140,8 +137,6 @@ OFILES=\
 
 TESTOFILES=\
 	obj/util/pcre.o\
-	obj/util/random.o\
-	obj/util/thread.o\
 	obj/re2/testing/backtrack.o\
 	obj/re2/testing/dump.o\
 	obj/re2/testing/exhaustive_tester.o\

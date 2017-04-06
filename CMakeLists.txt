@@ -24,10 +24,8 @@ endif()
 
 if(WIN32)
   add_definitions(-DUNICODE -D_UNICODE -DSTRICT -DNOMINMAX)
-  set(THREADING threadwin)
 elseif(UNIX)
   add_compile_options(-pthread)
-  set(THREADING thread)
   list(APPEND EXTRA_TARGET_LINK_LIBRARIES -pthread)
 endif()
 
@@ -59,12 +57,9 @@ set(RE2_LIBRARY_SOURCES
     re2/tostring.cc
     re2/unicode_casefold.cc
     re2/unicode_groups.cc
-    util/hash.cc
     util/logging.cc
     util/rune.cc
-    util/stringprintf.cc
     util/strutil.cc
-    util/valgrind.cc
     )
 
 add_library(re2 ${RE2_LIBRARY_SOURCES})
@@ -78,8 +73,6 @@ set(TEST_LIBRARY_SOURCES
     re2/testing/string_generator.cc
     re2/testing/tester.cc
     util/pcre.cc
-    util/random.cc
-    util/${THREADING}.cc
     )
 
 add_library(test STATIC ${TEST_LIBRARY_SOURCES} util/test.cc)

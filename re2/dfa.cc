@@ -21,8 +21,24 @@
 //
 // See http://swtch.com/~rsc/regexp/ for a very bare-bones equivalent.
 
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/types.h>
+#include <algorithm>
+#include <atomic>
+#include <map>
+#include <new>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 #include "util/flags.h"
+#include "util/mix.h"
 #include "util/sparse_set.h"
+#include "util/strutil.h"
 #include "re2/prog.h"
 #include "re2/stringpiece.h"
 
@@ -53,7 +69,7 @@ static const bool DebugDFA = false;
 // the comments in the sections that follow the DFA definition.
 class DFA {
  public:
-  DFA(Prog* prog, Prog::MatchKind kind, int64 max_mem);
+  DFA(Prog* prog, Prog::MatchKind kind, int64_t max_mem);
   ~DFA();
   bool ok() const { return !init_failed_; }
   Prog::MatchKind kind() { return kind_; }
@@ -73,7 +89,7 @@ class DFA {
   //   memory), it sets *failed and returns false.
   bool Search(const StringPiece& text, const StringPiece& context,
               bool anchored, bool want_earliest_match, bool run_forward,
-              bool* failed, const char** ep, vector<int>* matches);
+              bool* failed, const char** ep, std::vector<int>* matches);
 
   // Builds out all states for the entire DFA.  FOR TESTING ONLY
   // Returns number of states.
@@ -85,20 +101,20 @@ class DFA {
 
   // These data structures are logically private, but C++ makes it too
   // difficult to mark them as such.
-  class Workq;
   class RWLocker;
   class StateSaver;
+  class Workq;
 
   // A single DFA state.  The DFA is represented as a graph of these
   // States, linked by the next_ pointers.  If in state s and reading
   // byte c, the next state should be s->next_[c].
   struct State {
     inline bool IsMatch() const { return (flag_ & kFlagMatch) != 0; }
-    void SaveMatch(vector<int>* v);
+    void SaveMatch(std::vector<int>* v);
 
     int* inst_;         // Instruction pointers in the state.
     int ninst_;         // # of inst_ pointers.
-    uint flag_;         // Empty string bitfield flags in effect on the way
+    uint32_t flag_;     // Empty string bitfield flags in effect on the way
                         // into this state, along with kFlagMatch if this
                         // is a matching state.
     std::atomic<State*> next_[];    // Outgoing arrows from State,
@@ -114,65 +130,35 @@ class DFA {
     kFlagNeedShift = 16,        // needed kEmpty bits are or'ed in shifted left
   };
 
-#ifndef STL_MSVC
-  // STL function structures for use with unordered_set.
+  struct StateHash {
+    size_t operator()(const State* a) const {
+      DCHECK(a != NULL);
+      HashMix mix(a->flag_);
+      for (int i = 0; i < a->ninst_; i++)
+        mix.Mix(a->inst_[i]);
+      mix.Mix(0);
+      return mix.get();
+    }
+  };
+
   struct StateEqual {
     bool operator()(const State* a, const State* b) const {
+      DCHECK(a != NULL);
+      DCHECK(b != NULL);
       if (a == b)
         return true;
-      if (a == NULL || b == NULL)
+      if (a->flag_ != b->flag_)
         return false;
       if (a->ninst_ != b->ninst_)
-        return false;
-      if (a->flag_ != b->flag_)
         return false;
       for (int i = 0; i < a->ninst_; i++)
         if (a->inst_[i] != b->inst_[i])
           return false;
-      return true;  // they're equal
+      return true;
     }
   };
-#endif  // STL_MSVC
-  struct StateHash {
-    size_t operator()(const State* a) const {
-      if (a == NULL)
-        return 0;
-      const char* s = reinterpret_cast<const char*>(a->inst_);
-      int len = a->ninst_ * sizeof a->inst_[0];
-      if (sizeof(size_t) == sizeof(uint32))
-        return Hash32StringWithSeed(s, len, a->flag_);
-      else
-        return static_cast<size_t>(Hash64StringWithSeed(s, len, a->flag_));
-    }
-#ifdef STL_MSVC
-    // Less than operator.
-    bool operator()(const State* a, const State* b) const {
-      if (a == b)
-        return false;
-      if (a == NULL || b == NULL)
-        return a == NULL;
-      if (a->ninst_ != b->ninst_)
-        return a->ninst_ < b->ninst_;
-      if (a->flag_ != b->flag_)
-        return a->flag_ < b->flag_;
-      for (int i = 0; i < a->ninst_; ++i)
-        if (a->inst_[i] != b->inst_[i])
-          return a->inst_[i] < b->inst_[i];
-      return false;  // they're equal
-    }
-    // The two public members are required by msvc. 4 and 8 are default values.
-    // Reference: http://msdn.microsoft.com/en-us/library/1s1byw77.aspx
-    static const size_t bucket_size = 4;
-    static const size_t min_buckets = 8;
-#endif  // STL_MSVC
-  };
 
-#ifdef STL_MSVC
-  typedef unordered_set<State*, StateHash> StateSet;
-#else  // !STL_MSVC
-  typedef unordered_set<State*, StateHash, StateEqual> StateSet;
-#endif  // STL_MSVC
-
+  typedef std::unordered_set<State*, StateHash, StateEqual> StateSet;
 
  private:
   // Special "firstbyte" values for a state.  (Values >= 0 denote actual bytes.)
@@ -204,11 +190,11 @@ class DFA {
 
   // Looks up and returns the State corresponding to a Workq.
   // L >= mutex_
-  State* WorkqToCachedState(Workq* q, uint flag);
+  State* WorkqToCachedState(Workq* q, uint32_t flag);
 
   // Looks up and returns a State matching the inst, ninst, and flag.
   // L >= mutex_
-  State* CachedState(int* inst, int ninst, uint flag);
+  State* CachedState(int* inst, int ninst, uint32_t flag);
 
   // Clear the cache entirely.
   // Must hold cache_mutex_.w or be in destructor.
@@ -227,17 +213,17 @@ class DFA {
   // sets *ismatch to true.
   // L >= mutex_
   void RunWorkqOnByte(Workq* q, Workq* nq,
-                      int c, uint flag, bool* ismatch,
+                      int c, uint32_t flag, bool* ismatch,
                       Prog::MatchKind kind);
 
   // Runs a Workq on a set of empty-string flags, producing a new Workq in nq.
   // L >= mutex_
-  void RunWorkqOnEmptyString(Workq* q, Workq* nq, uint flag);
+  void RunWorkqOnEmptyString(Workq* q, Workq* nq, uint32_t flag);
 
   // Adds the instruction id to the Workq, following empty arrows
   // according to flag.
   // L >= mutex_
-  void AddToQueue(Workq* q, int id, uint flag);
+  void AddToQueue(Workq* q, int id, uint32_t flag);
 
   // For debugging, returns a text representation of State.
   static string DumpState(State* state);
@@ -270,7 +256,7 @@ class DFA {
     RWLocker *cache_lock;
     bool failed;     // "out" parameter: whether search gave up
     const char* ep;  // "out" parameter: end pointer for match
-    vector<int>* matches;
+    std::vector<int>* matches;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(SearchParams);
@@ -290,7 +276,8 @@ class DFA {
   // false on failure.
   // cache_mutex_.r <= L < mutex_
   bool AnalyzeSearch(SearchParams* params);
-  bool AnalyzeSearchHelper(SearchParams* params, StartInfo* info, uint flags);
+  bool AnalyzeSearchHelper(SearchParams* params, StartInfo* info,
+                           uint32_t flags);
 
   // The generic search loop, inlined to create specialized versions.
   // cache_mutex_.r <= L < mutex_
@@ -355,16 +342,16 @@ class DFA {
   // readers.  Any State* pointers are only valid while cache_mutex_
   // is held.
   Mutex cache_mutex_;
-  int64 mem_budget_;       // Total memory budget for all States.
-  int64 state_budget_;     // Amount of memory remaining for new States.
+  int64_t mem_budget_;     // Total memory budget for all States.
+  int64_t state_budget_;   // Amount of memory remaining for new States.
   StateSet state_cache_;   // All States computed so far.
   StartInfo start_[kMaxStart];
   bool cache_warned_;      // have printed to LOG(INFO) about the cache
 };
 
-// Shorthand for casting to uint8*.
-static inline const uint8* BytePtr(const void* v) {
-  return reinterpret_cast<const uint8*>(v);
+// Shorthand for casting to uint8_t*.
+static inline const uint8_t* BytePtr(const void* v) {
+  return reinterpret_cast<const uint8_t*>(v);
 }
 
 // Work queues
@@ -428,7 +415,7 @@ class DFA::Workq : public SparseSet {
   DISALLOW_COPY_AND_ASSIGN(Workq);
 };
 
-DFA::DFA(Prog* prog, Prog::MatchKind kind, int64 max_mem)
+DFA::DFA(Prog* prog, Prog::MatchKind kind, int64_t max_mem)
   : prog_(prog),
     kind_(kind),
     init_failed_(false),
@@ -454,8 +441,8 @@ DFA::DFA(Prog* prog, Prog::MatchKind kind, int64 max_mem)
                  (sizeof(int)+sizeof(int)) * 2;  // q0, q1
   mem_budget_ -= nastack_ * sizeof(int);  // astack
   if (mem_budget_ < 0) {
-    LOG(INFO) << StringPrintf("DFA out of memory: prog size %d mem %lld",
-                              prog_->size(), max_mem);
+    LOG(INFO) << "DFA out of memory: prog size " << prog_->size()
+              << " mem " << max_mem;
     init_failed_ = true;
     return;
   }
@@ -469,11 +456,11 @@ DFA::DFA(Prog* prog, Prog::MatchKind kind, int64 max_mem)
   // Note that a state stores list heads only, so we use the program
   // list count for the upper bound, not the program size.
   int nnext = prog_->bytemap_range() + 1;  // + 1 for kByteEndText slot
-  int64 one_state = sizeof(State) + nnext*sizeof(std::atomic<State*>) +
-                    (prog_->list_count()+nmark)*sizeof(int);
+  int64_t one_state = sizeof(State) + nnext*sizeof(std::atomic<State*>) +
+                      (prog_->list_count()+nmark)*sizeof(int);
   if (state_budget_ < 20*one_state) {
-    LOG(INFO) << StringPrintf("DFA out of memory: prog size %d mem %lld",
-                              prog_->size(), max_mem);
+    LOG(INFO) << "DFA out of memory: prog size " << prog_->size()
+              << " mem " << max_mem;
     init_failed_ = true;
     return;
   }
@@ -602,7 +589,7 @@ string DFA::DumpState(State* state) {
 // Looks in the State cache for a State matching q, flag.
 // If one is found, returns it.  If one is not found, allocates one,
 // inserts it in the cache, and returns it.
-DFA::State* DFA::WorkqToCachedState(Workq* q, uint flag) {
+DFA::State* DFA::WorkqToCachedState(Workq* q, uint32_t flag) {
   if (DEBUG_MODE)
     mutex_.AssertHeld();
 
@@ -612,9 +599,9 @@ DFA::State* DFA::WorkqToCachedState(Workq* q, uint flag) {
   // RunWorkqOnEmptyString or RunWorkqOnByte.
   int* inst = new int[q->size()];
   int n = 0;
-  uint needflags = 0;     // flags needed by kInstEmptyWidth instructions
-  bool sawmatch = false;  // whether queue contains guaranteed kInstMatch
-  bool sawmark = false;  // whether queue contains a Mark
+  uint32_t needflags = 0;  // flags needed by kInstEmptyWidth instructions
+  bool sawmatch = false;   // whether queue contains guaranteed kInstMatch
+  bool sawmark = false;    // whether queue contains a Mark
   if (DebugDFA)
     fprintf(stderr, "WorkqToCachedState %s [%#x]", DumpWorkq(q).c_str(), flag);
   for (Workq::iterator it = q->begin(); it != q->end(); ++it) {
@@ -645,7 +632,7 @@ DFA::State* DFA::WorkqToCachedState(Workq* q, uint flag) {
             fprintf(stderr, " -> FullMatchState\n");
           return FullMatchState;
         }
-        // Fall through.
+        FALLTHROUGH_INTENDED;
       default:
         // Record iff id is the head of its list, which must
         // be the case if id-1 is the last of *its* list. :)
@@ -703,7 +690,7 @@ DFA::State* DFA::WorkqToCachedState(Workq* q, uint flag) {
       int* markp = ip;
       while (markp < ep && *markp != Mark)
         markp++;
-      sort(ip, markp);
+      std::sort(ip, markp);
       if (markp < ep)
         markp++;
       ip = markp;
@@ -721,7 +708,7 @@ DFA::State* DFA::WorkqToCachedState(Workq* q, uint flag) {
 // Looks in the State cache for a State matching inst, ninst, flag.
 // If one is found, returns it.  If one is not found, allocates one,
 // inserts it in the cache, and returns it.
-DFA::State* DFA::CachedState(int* inst, int ninst, uint flag) {
+DFA::State* DFA::CachedState(int* inst, int ninst, uint32_t flag) {
   if (DEBUG_MODE)
     mutex_.AssertHeld();
 
@@ -741,9 +728,9 @@ DFA::State* DFA::CachedState(int* inst, int ninst, uint flag) {
 
   // Must have enough memory for new state.
   // In addition to what we're going to allocate,
-  // the state cache hash table seems to incur about 32 bytes per
+  // the state cache hash table seems to incur about 40 bytes per
   // State*, empirically.
-  const int kStateCacheOverhead = 32;
+  const int kStateCacheOverhead = 40;
   int nnext = prog_->bytemap_range() + 1;  // + 1 for kByteEndText slot
   int mem = sizeof(State) + nnext*sizeof(std::atomic<State*>) +
             ninst*sizeof(int);
@@ -775,16 +762,15 @@ DFA::State* DFA::CachedState(int* inst, int ninst, uint flag) {
 
 // Clear the cache.  Must hold cache_mutex_.w or be in destructor.
 void DFA::ClearCache() {
-  // In case state_cache_ doesn't support deleting entries
-  // during iteration, copy into a vector and then delete.
-  vector<State*> v;
-  v.reserve(state_cache_.size());
-  for (StateSet::iterator it = state_cache_.begin();
-       it != state_cache_.end(); ++it)
-    v.push_back(*it);
+  StateSet::iterator begin = state_cache_.begin();
+  StateSet::iterator end = state_cache_.end();
+  while (begin != end) {
+    StateSet::iterator tmp = begin;
+    ++begin;
+    // Deallocate the blob of memory that we allocated in DFA::CachedState().
+    delete[] reinterpret_cast<const char*>(*tmp);
+  }
   state_cache_.clear();
-  for (size_t i = 0; i < v.size(); i++)
-    delete[] reinterpret_cast<const char*>(v[i]);
 }
 
 // Copies insts in state s to the work queue q.
@@ -800,7 +786,7 @@ void DFA::StateToWorkq(State* s, Workq* q) {
 }
 
 // Adds ip to the work queue, following empty arrows according to flag.
-void DFA::AddToQueue(Workq* q, int id, uint flag) {
+void DFA::AddToQueue(Workq* q, int id, uint32_t flag) {
 
   // Use astack_ to hold our stack of instructions yet to process.
   // It was preallocated as follows:
@@ -900,7 +886,7 @@ void DFA::AddToQueue(Workq* q, int id, uint flag) {
 // and then processing only $.  Doing the two-step sequence won't match
 // ^$^$^$ but processing ^ and $ simultaneously will (and is the behavior
 // exhibited by existing implementations).
-void DFA::RunWorkqOnEmptyString(Workq* oldq, Workq* newq, uint flag) {
+void DFA::RunWorkqOnEmptyString(Workq* oldq, Workq* newq, uint32_t flag) {
   newq->clear();
   for (Workq::iterator i = oldq->begin(); i != oldq->end(); ++i) {
     if (oldq->is_mark(*i))
@@ -915,7 +901,7 @@ void DFA::RunWorkqOnEmptyString(Workq* oldq, Workq* newq, uint flag) {
 // means to match c$.  Sets the bool *ismatch to true if the end of the
 // regular expression program has been reached (the regexp has matched).
 void DFA::RunWorkqOnByte(Workq* oldq, Workq* newq,
-                         int c, uint flag, bool* ismatch,
+                         int c, uint32_t flag, bool* ismatch,
                          Prog::MatchKind kind) {
   if (DEBUG_MODE)
     mutex_.AssertHeld();
@@ -1009,10 +995,10 @@ DFA::State* DFA::RunStateOnByte(State* state, int c) {
   // around this byte.  Before the byte we have the flags recorded
   // in the State structure itself.  After the byte we have
   // nothing yet (but that will change: read on).
-  uint needflag = state->flag_ >> kFlagNeedShift;
-  uint beforeflag = state->flag_ & kFlagEmptyMask;
-  uint oldbeforeflag = beforeflag;
-  uint afterflag = 0;
+  uint32_t needflag = state->flag_ >> kFlagNeedShift;
+  uint32_t beforeflag = state->flag_ & kFlagEmptyMask;
+  uint32_t oldbeforeflag = beforeflag;
+  uint32_t afterflag = 0;
 
   if (c == '\n') {
     // Insert implicit $ and ^ around \n
@@ -1029,7 +1015,7 @@ DFA::State* DFA::RunStateOnByte(State* state, int c) {
   // byte processed was a word character.  Use that info to
   // insert empty-width (non-)word boundaries.
   bool islastword = (state->flag_ & kFlagLastWord) != 0;
-  bool isword = (c != kByteEndText && Prog::IsWordChar(static_cast<uint8>(c)));
+  bool isword = c != kByteEndText && Prog::IsWordChar(static_cast<uint8_t>(c));
   if (isword == islastword)
     beforeflag |= kEmptyNonWordBoundary;
   else
@@ -1039,6 +1025,7 @@ DFA::State* DFA::RunStateOnByte(State* state, int c) {
   // Only useful to rerun on empty string if there are new, useful flags.
   if (beforeflag & ~oldbeforeflag & needflag) {
     RunWorkqOnEmptyString(q0_, q1_, beforeflag);
+    using std::swap;
     swap(q0_, q1_);
   }
   bool ismatch = false;
@@ -1052,11 +1039,13 @@ DFA::State* DFA::RunStateOnByte(State* state, int c) {
   // of the string, but we're at the end of the text so that's okay.
   // Leaving q0_ alone preseves the match instructions that led to
   // the current setting of ismatch.
-  if (c != kByteEndText || kind_ != Prog::kManyMatch)
+  if (c != kByteEndText || kind_ != Prog::kManyMatch) {
+    using std::swap;
     swap(q0_, q1_);
+  }
 
   // Save afterflag along with ismatch and isword in new state.
-  uint flag = afterflag;
+  uint32_t flag = afterflag;
   if (ismatch)
     flag |= kFlagMatch;
   if (isword)
@@ -1125,7 +1114,7 @@ DFA::RWLocker::RWLocker(Mutex* mu)
 void DFA::RWLocker::LockForWriting() NO_THREAD_SAFETY_ANALYSIS {
   if (!writing_) {
     mu_->ReaderUnlock();
-    mu_->Lock();
+    mu_->WriterLock();
     writing_ = true;
   }
 }
@@ -1207,7 +1196,7 @@ class DFA::StateSaver {
   DFA* dfa_;         // the DFA to use
   int* inst_;        // saved info from State
   int ninst_;
-  uint flag_;
+  uint32_t flag_;
   bool is_special_;  // whether original state was special
   State* special_;   // if is_special_, the original state
 
@@ -1321,15 +1310,17 @@ inline bool DFA::InlinedSearchLoop(SearchParams* params,
                                    bool want_earliest_match,
                                    bool run_forward) {
   State* start = params->start;
-  const uint8* bp = BytePtr(params->text.begin());  // start of text
-  const uint8* p = bp;                              // text scanning point
-  const uint8* ep = BytePtr(params->text.end());    // end of text
-  const uint8* resetp = NULL;                       // p at last cache reset
-  if (!run_forward)
+  const uint8_t* bp = BytePtr(params->text.begin());  // start of text
+  const uint8_t* p = bp;                              // text scanning point
+  const uint8_t* ep = BytePtr(params->text.end());    // end of text
+  const uint8_t* resetp = NULL;                       // p at last cache reset
+  if (!run_forward) {
+    using std::swap;
     swap(p, ep);
+  }
 
-  const uint8* bytemap = prog_->bytemap();
-  const uint8* lastmatch = NULL;   // most recent matching position in text
+  const uint8_t* bytemap = prog_->bytemap();
+  const uint8_t* lastmatch = NULL;   // most recent matching position in text
   bool matched = false;
   State* s = start;
 
@@ -1402,7 +1393,7 @@ inline bool DFA::InlinedSearchLoop(SearchParams* params,
         // of 10 bytes per state computation, fail so that RE2 can
         // fall back to the NFA.
         if (FLAGS_re2_dfa_bail_when_slow && resetp != NULL &&
-            static_cast<unsigned long>(p - resetp) < 10*state_cache_.size()) {
+            static_cast<size_t>(p - resetp) < 10*state_cache_.size()) {
           params->failed = true;
           return false;
         }
@@ -1505,7 +1496,7 @@ inline bool DFA::InlinedSearchLoop(SearchParams* params,
     matched = true;
     lastmatch = p;
     if (params->matches && kind_ == Prog::kManyMatch) {
-      vector<int>* v = params->matches;
+      std::vector<int>* v = params->matches;
       v->clear();
       for (int i = 0; i < s->ninst_; i++) {
         Prog::Inst* ip = prog_->inst(s->inst_[i]);
@@ -1623,7 +1614,7 @@ bool DFA::AnalyzeSearch(SearchParams* params) {
 
   // Determine correct search type.
   int start;
-  uint flags;
+  uint32_t flags;
   if (params->run_forward) {
     if (text.begin() == context.begin()) {
       start = kStartBeginText;
@@ -1682,7 +1673,7 @@ bool DFA::AnalyzeSearch(SearchParams* params) {
 
 // Fills in info if needed.  Returns true on success, false on failure.
 bool DFA::AnalyzeSearchHelper(SearchParams* params, StartInfo* info,
-                              uint flags) {
+                              uint32_t flags) {
   // Quick check.
   int fb = info->firstbyte.load(std::memory_order_acquire);
   if (fb != kFbUnknown)
@@ -1721,7 +1712,7 @@ bool DFA::AnalyzeSearchHelper(SearchParams* params, StartInfo* info,
     State* s = RunStateOnByte(info->start, i);
     if (s == NULL) {
       // Synchronize with "quick check" above.
-      info->firstbyte.store(firstbyte, std::memory_order_release);
+      info->firstbyte.store(kFbUnknown, std::memory_order_release);
       return false;
     }
     if (s == info->start)
@@ -1748,7 +1739,7 @@ bool DFA::Search(const StringPiece& text,
                  bool run_forward,
                  bool* failed,
                  const char** epp,
-                 vector<int>* matches) {
+                 std::vector<int>* matches) {
   *epp = NULL;
   if (!ok()) {
     *failed = true;
@@ -1820,7 +1811,7 @@ DFA* Prog::GetDFA(MatchKind kind) {
   // For a reverse DFA, all the memory goes to the
   // "longest match" DFA, because RE2 never does reverse
   // "first match" searches.
-  int64 m = dfa_mem_;
+  int64_t m = dfa_mem_;
   if (reversed_) {
     DCHECK_EQ(kind, kLongestMatch);
   } else if (kind == kFirstMatch || kind == kLongestMatch) {
@@ -1852,8 +1843,8 @@ void Prog::DeleteDFA(std::atomic<DFA*>* pdfa) {
 // This is the only external interface (class DFA only exists in this file).
 //
 bool Prog::SearchDFA(const StringPiece& text, const StringPiece& const_context,
-                     Anchor anchor, MatchKind kind,
-                     StringPiece* match0, bool* failed, vector<int>* matches) {
+                     Anchor anchor, MatchKind kind, StringPiece* match0,
+                     bool* failed, std::vector<int>* matches) {
   *failed = false;
 
   StringPiece context = const_context;
@@ -1930,7 +1921,7 @@ int DFA::BuildAllStates() {
 
   // Add start state to work queue.
   StateSet queued;
-  vector<State*> q;
+  std::vector<State*> q;
   queued.insert(params.start);
   q.push_back(params.start);
 
@@ -1974,7 +1965,7 @@ bool DFA::PossibleMatchRange(string* min, string* max, int maxlen) {
   // Also note that previously_visited_states[UnseenStatePtr] will, in the STL
   // tradition, implicitly insert a '0' value at first use. We take advantage
   // of that property below.
-  map<State*, int> previously_visited_states;
+  std::map<State*, int> previously_visited_states;
 
   // Pick out start state for anchored search at beginning of text.
   RWLocker l(&cache_mutex_);

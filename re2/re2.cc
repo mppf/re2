@@ -9,12 +9,22 @@
 
 #include "re2/re2.h"
 
-#include <stdio.h>
-#include <string>
+#include <assert.h>
+#include <ctype.h>
 #include <errno.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <iterator>
+#include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "util/util.h"
 #include "util/flags.h"
 #include "util/sparse_array.h"
+#include "util/strutil.h"
 #include "re2/prog.h"
 #include "re2/regexp.h"
 
@@ -50,8 +60,8 @@ RE2::Options::Options(RE2::CannedOptions opt)
 // static empty objects for use as const references.
 // To avoid global constructors, allocated in RE2::Init().
 static const string* empty_string;
-static const map<string, int>* empty_named_groups;
-static const map<int, string>* empty_group_names;
+static const std::map<string, int>* empty_named_groups;
+static const std::map<int, string>* empty_group_names;
 
 // Converts from Regexp error code to RE2 error code.
 // Maybe some day they will diverge.  In any event, this
@@ -161,8 +171,8 @@ void RE2::Init(const StringPiece& pattern, const Options& options) {
   static std::once_flag empty_once;
   std::call_once(empty_once, []() {
     empty_string = new string;
-    empty_named_groups = new map<string, int>;
-    empty_group_names = new map<int, string>;
+    empty_named_groups = new std::map<string, int>;
+    empty_group_names = new std::map<int, string>;
   });
 
   pattern_ = pattern.as_string();
@@ -260,7 +270,7 @@ int RE2::ProgramSize() const {
   return prog_->size();
 }
 
-int RE2::ProgramFanout(map<int, int>* histogram) const {
+int RE2::ProgramFanout(std::map<int, int>* histogram) const {
   if (prog_ == NULL)
     return -1;
   SparseArray<int> fanout(prog_->size());
@@ -288,7 +298,7 @@ int RE2::NumberOfCapturingGroups() const {
 }
 
 // Returns named_groups_, computing it if needed.
-const map<string, int>& RE2::NamedCapturingGroups() const {
+const std::map<string, int>& RE2::NamedCapturingGroups() const {
   std::call_once(named_groups_once_, [this]() {
     if (suffix_regexp_ != NULL)
       named_groups_ = suffix_regexp_->NamedCaptures();
@@ -299,7 +309,7 @@ const map<string, int>& RE2::NamedCapturingGroups() const {
 }
 
 // Returns group_names_, computing it if needed.
-const map<int, string>& RE2::CapturingGroupNames() const {
+const std::map<int, string>& RE2::CapturingGroupNames() const {
   std::call_once(group_names_once_, [this]() {
     if (suffix_regexp_ != NULL)
       group_names_ = suffix_regexp_->CaptureNames();
@@ -403,6 +413,26 @@ int RE2::GlobalReplace(string *str,
       out.append(p, vec[0].begin() - p);
     if (vec[0].begin() == lastend && vec[0].size() == 0) {
       // Disallow empty match at end of last match: skip ahead.
+      if (re.options().encoding() == RE2::Options::EncodingUTF8 &&
+          fullrune(p, static_cast<int>(ep - p))) {
+        // re is in UTF-8 mode and there is enough left of str
+        // to allow us to advance by up to UTFmax bytes.
+        Rune r;
+        int n = chartorune(&r, p);
+        // Some copies of chartorune have a bug that accepts
+        // encodings of values in (10FFFF, 1FFFFF] as valid.
+        if (r > Runemax) {
+          n = 1;
+          r = Runeerror;
+        }
+        if (!(n == 1 && r == Runeerror)) {  // no decoding error
+          out.append(p, n);
+          p += n;
+          continue;
+        }
+      }
+      // Most likely, re is in Latin-1 mode. If it is in UTF-8 mode,
+      // we fell through from above and the GIGO principle applies.
       if (p < ep)
         out.append(p, 1);
       p++;
@@ -419,6 +449,7 @@ int RE2::GlobalReplace(string *str,
 
   if (p < ep)
     out.append(p, ep - p);
+  using std::swap;
   swap(out, *str);
   return count;
 }
@@ -527,8 +558,8 @@ static int ascii_strcasecmp(const char* a, ptr_type b, int len) {
   const char* ae = a + len;
 
   for (; a < ae; a++, b++) {
-    uint8 x = *a;
-    uint8 y = *b;
+    uint8_t x = *a;
+    uint8_t y = *b;
     if ('A' <= y && y <= 'Z')
       y += 'a' - 'A';
     if (x != y)
@@ -1103,6 +1134,13 @@ bool RE2::Arg::parse_char(const char* str, int n, void* dest) {
   return true;
 }
 
+bool RE2::Arg::parse_schar(const char* str, int n, void* dest) {
+  if (n != 1) return false;
+  if (dest == NULL) return true;
+  *(reinterpret_cast<signed char*>(dest)) = str[0];
+  return true;
+}
+
 bool RE2::Arg::parse_uchar(const char* str, int n, void* dest) {
   if (n != 1) return false;
   if (dest == NULL) return true;
@@ -1215,8 +1253,8 @@ bool RE2::Arg::parse_short_radix(const char* str,
                                 void* dest,
                                 int radix) {
   long r;
-  if (!parse_long_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((short)r != r) return false;       // Out of range
+  if (!parse_long_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((short)r != r) return false;                         // Out of range
   if (dest == NULL) return true;
   *(reinterpret_cast<short*>(dest)) = (short)r;
   return true;
@@ -1227,10 +1265,10 @@ bool RE2::Arg::parse_ushort_radix(const char* str,
                                  void* dest,
                                  int radix) {
   unsigned long r;
-  if (!parse_ulong_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((ushort)r != r) return false;                      // Out of range
+  if (!parse_ulong_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((unsigned short)r != r) return false;                 // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<unsigned short*>(dest)) = (ushort)r;
+  *(reinterpret_cast<unsigned short*>(dest)) = (unsigned short)r;
   return true;
 }
 
@@ -1239,10 +1277,10 @@ bool RE2::Arg::parse_int_radix(const char* str,
                               void* dest,
                               int radix) {
   long r;
-  if (!parse_long_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((int)r != r) return false;         // Out of range
+  if (!parse_long_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((int)r != r) return false;                           // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<int*>(dest)) = r;
+  *(reinterpret_cast<int*>(dest)) = (int)r;
   return true;
 }
 
@@ -1251,14 +1289,13 @@ bool RE2::Arg::parse_uint_radix(const char* str,
                                void* dest,
                                int radix) {
   unsigned long r;
-  if (!parse_ulong_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((uint)r != r) return false;                       // Out of range
+  if (!parse_ulong_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((unsigned int)r != r) return false;                   // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<unsigned int*>(dest)) = r;
+  *(reinterpret_cast<unsigned int*>(dest)) = (unsigned int)r;
   return true;
 }
 
-#if RE2_HAVE_LONGLONG
 bool RE2::Arg::parse_longlong_radix(const char* str,
                                    int n,
                                    void* dest,
@@ -1268,11 +1305,11 @@ bool RE2::Arg::parse_longlong_radix(const char* str,
   str = TerminateNumber(buf, sizeof buf, str, &n, false);
   char* end;
   errno = 0;
-  int64 r = strtoll(str, &end, radix);
+  long long r = strtoll(str, &end, radix);
   if (end != str + n) return false;   // Leftover junk
   if (errno) return false;
   if (dest == NULL) return true;
-  *(reinterpret_cast<int64*>(dest)) = r;
+  *(reinterpret_cast<long long*>(dest)) = r;
   return true;
 }
 
@@ -1290,14 +1327,13 @@ bool RE2::Arg::parse_ulonglong_radix(const char* str,
   }
   char* end;
   errno = 0;
-  uint64 r = strtoull(str, &end, radix);
+  unsigned long long r = strtoull(str, &end, radix);
   if (end != str + n) return false;   // Leftover junk
   if (errno) return false;
   if (dest == NULL) return true;
-  *(reinterpret_cast<uint64*>(dest)) = r;
+  *(reinterpret_cast<unsigned long long*>(dest)) = r;
   return true;
 }
-#endif
 
 static bool parse_double_float(const char* str, int n, bool isfloat, void *dest) {
   if (n == 0) return false;
@@ -1331,30 +1367,29 @@ bool RE2::Arg::parse_float(const char* str, int n, void* dest) {
   return parse_double_float(str, n, true, dest);
 }
 
-
-#define DEFINE_INTEGER_PARSERS(name)                                        \
+#define DEFINE_INTEGER_PARSER(name)                                          \
   bool RE2::Arg::parse_##name(const char* str, int n, void* dest) {          \
-    return parse_##name##_radix(str, n, dest, 10);                          \
-  }                                                                         \
+    return parse_##name##_radix(str, n, dest, 10);                           \
+  }                                                                          \
   bool RE2::Arg::parse_##name##_hex(const char* str, int n, void* dest) {    \
-    return parse_##name##_radix(str, n, dest, 16);                          \
-  }                                                                         \
+    return parse_##name##_radix(str, n, dest, 16);                           \
+  }                                                                          \
   bool RE2::Arg::parse_##name##_octal(const char* str, int n, void* dest) {  \
-    return parse_##name##_radix(str, n, dest, 8);                           \
-  }                                                                         \
+    return parse_##name##_radix(str, n, dest, 8);                            \
+  }                                                                          \
   bool RE2::Arg::parse_##name##_cradix(const char* str, int n, void* dest) { \
-    return parse_##name##_radix(str, n, dest, 0);                           \
+    return parse_##name##_radix(str, n, dest, 0);                            \
   }
 
-DEFINE_INTEGER_PARSERS(short);
-DEFINE_INTEGER_PARSERS(ushort);
-DEFINE_INTEGER_PARSERS(int);
-DEFINE_INTEGER_PARSERS(uint);
-DEFINE_INTEGER_PARSERS(long);
-DEFINE_INTEGER_PARSERS(ulong);
-DEFINE_INTEGER_PARSERS(longlong);
-DEFINE_INTEGER_PARSERS(ulonglong);
+DEFINE_INTEGER_PARSER(short);
+DEFINE_INTEGER_PARSER(ushort);
+DEFINE_INTEGER_PARSER(int);
+DEFINE_INTEGER_PARSER(uint);
+DEFINE_INTEGER_PARSER(long);
+DEFINE_INTEGER_PARSER(ulong);
+DEFINE_INTEGER_PARSER(longlong);
+DEFINE_INTEGER_PARSER(ulonglong);
 
-#undef DEFINE_INTEGER_PARSERS
+#undef DEFINE_INTEGER_PARSER
 
 }  // namespace re2

@@ -4,8 +4,15 @@
 
 // Regular expression engine tester -- test all the implementations against each other.
 
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include <sys/types.h>
+#include <string>
+
 #include "util/util.h"
 #include "util/flags.h"
+#include "util/strutil.h"
 #include "re2/testing/tester.h"
 #include "re2/prog.h"
 #include "re2/re2.h"
@@ -48,9 +55,9 @@ static StringPiece EngineName(Engine e) {
 }
 
 // Returns bit mask of engines to use.
-static uint32 Engines() {
+static uint32_t Engines() {
   static bool did_parse = false;
-  static uint32 cached_engines = 0;
+  static uint32_t cached_engines = 0;
 
   if (did_parse)
     return cached_engines;
@@ -101,7 +108,7 @@ static string FormatCapture(const StringPiece& text, const StringPiece& s) {
 // Returns whether text contains non-ASCII (>= 0x80) bytes.
 static bool NonASCII(const StringPiece& text) {
   for (int i = 0; i < text.size(); i++)
-    if ((uint8)text[i] >= 0x80)
+    if ((uint8_t)text[i] >= 0x80)
       return true;
   return false;
 }
@@ -154,7 +161,7 @@ static string FormatMode(Regexp::ParseFlags flags) {
   for (int i = 0; i < arraysize(parse_modes); i++)
     if (parse_modes[i].parse_flags == flags)
       return parse_modes[i].desc;
-  return StringPrintf("%#x", static_cast<uint>(flags));
+  return StringPrintf("%#x", static_cast<uint32_t>(flags));
 }
 
 // Constructs and saves all the matching engines that
@@ -407,6 +414,16 @@ void TestInstance::RunSearch(Engine type,
     case kEnginePCRE: {
       if (!re_ || text.begin() != context.begin() ||
           text.end() != context.end()) {
+        result->skipped = true;
+        break;
+      }
+
+      // In Perl/PCRE, \v matches any character considered vertical
+      // whitespace, not just vertical tab. Regexp::MimicsPCRE() is
+      // unable to handle all cases of this, unfortunately, so just
+      // catch them here. :(
+      if (regexp_str_.contains("\\v") &&
+          (text.contains("\n") || text.contains("\f") || text.contains("\r"))) {
         result->skipped = true;
         break;
       }

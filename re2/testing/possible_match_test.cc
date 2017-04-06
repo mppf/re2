@@ -2,8 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#include <string.h>
+#include <string>
 #include <vector>
+
 #include "util/test.h"
+#include "util/strutil.h"
 #include "re2/prog.h"
 #include "re2/re2.h"
 #include "re2/regexp.h"
@@ -167,10 +171,10 @@ class PossibleMatchTester : public RegexpGenerator {
  public:
   PossibleMatchTester(int maxatoms,
                       int maxops,
-                      const vector<string>& alphabet,
-                      const vector<string>& ops,
+                      const std::vector<string>& alphabet,
+                      const std::vector<string>& ops,
                       int maxstrlen,
-                      const vector<string>& stralphabet)
+                      const std::vector<string>& stralphabet)
     : RegexpGenerator(maxatoms, maxops, alphabet, ops),
       strgen_(maxstrlen, stralphabet),
       regexps_(0), tests_(0) { }

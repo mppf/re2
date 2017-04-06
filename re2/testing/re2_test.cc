@@ -5,15 +5,22 @@
 
 // TODO: Test extractions for PartialMatch/Consume
 
+#include <assert.h>
 #include <errno.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <map>
+#include <string>
+#include <utility>
 #if !defined(_MSC_VER) && !defined(__MINGW32__)
-#include <unistd.h>  /* for sysconf */
 #include <sys/mman.h>
+#include <unistd.h>  /* for sysconf */
 #endif
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <vector>
+
 #include "util/test.h"
+#include "util/strutil.h"
 #include "re2/re2.h"
 #include "re2/regexp.h"
 
@@ -476,7 +483,7 @@ TEST(ProgramFanout, BigProgram) {
   RE2 re100("(?:(?:(?:(?:(?:.)?){100})*)+)");
   RE2 re1000("(?:(?:(?:(?:(?:.)?){1000})*)+)");
 
-  map<int, int> histogram;
+  std::map<int, int> histogram;
 
   // 3 is the largest non-empty bucket and has 1 element.
   CHECK_EQ(3, re1.ProgramFanout(&histogram));
@@ -529,14 +536,14 @@ TEST(Capture, NamedGroups) {
   {
     RE2 re("(hello world)");
     CHECK_EQ(re.NumberOfCapturingGroups(), 1);
-    const map<string, int>& m = re.NamedCapturingGroups();
+    const std::map<string, int>& m = re.NamedCapturingGroups();
     CHECK_EQ(m.size(), 0);
   }
 
   {
     RE2 re("(?P<A>expr(?P<B>expr)(?P<C>expr))((expr)(?P<D>expr))");
     CHECK_EQ(re.NumberOfCapturingGroups(), 6);
-    const map<string, int>& m = re.NamedCapturingGroups();
+    const std::map<string, int>& m = re.NamedCapturingGroups();
     CHECK_EQ(m.size(), 4);
     CHECK_EQ(m.find("A")->second, 1);
     CHECK_EQ(m.find("B")->second, 2);
@@ -558,7 +565,7 @@ TEST(RE2, CapturedGroupTest) {
   const RE2::Arg* const matches[4] = {&arg0, &arg1, &arg2, &arg3};
   EXPECT_TRUE(RE2::FullMatchN("directions from mountain view to san jose",
                               re, matches, num_groups));
-  const map<string, int>& named_groups = re.NamedCapturingGroups();
+  const std::map<string, int>& named_groups = re.NamedCapturingGroups();
   EXPECT_TRUE(named_groups.find("S") != named_groups.end());
   EXPECT_TRUE(named_groups.find("D") != named_groups.end());
 
@@ -766,7 +773,7 @@ TEST(RE2, FullMatchTypeTests) {
     CHECK_EQ(c, static_cast<unsigned char>('H'));
   }
   {
-    int16 v;
+    int16_t v;
     CHECK(RE2::FullMatch("100",     "(-?\\d+)", &v));    CHECK_EQ(v, 100);
     CHECK(RE2::FullMatch("-100",    "(-?\\d+)", &v));    CHECK_EQ(v, -100);
     CHECK(RE2::FullMatch("32767",   "(-?\\d+)", &v));    CHECK_EQ(v, 32767);
@@ -775,16 +782,16 @@ TEST(RE2, FullMatchTypeTests) {
     CHECK(!RE2::FullMatch("32768",  "(-?\\d+)", &v));
   }
   {
-    uint16 v;
+    uint16_t v;
     CHECK(RE2::FullMatch("100",     "(\\d+)", &v));    CHECK_EQ(v, 100);
     CHECK(RE2::FullMatch("32767",   "(\\d+)", &v));    CHECK_EQ(v, 32767);
     CHECK(RE2::FullMatch("65535",   "(\\d+)", &v));    CHECK_EQ(v, 65535);
     CHECK(!RE2::FullMatch("65536",  "(\\d+)", &v));
   }
   {
-    int32 v;
-    static const int32 max = 0x7fffffff;
-    static const int32 min = -max - 1;
+    int32_t v;
+    static const int32_t max = INT32_C(0x7fffffff);
+    static const int32_t min = -max - 1;
     CHECK(RE2::FullMatch("100",          "(-?\\d+)", &v)); CHECK_EQ(v, 100);
     CHECK(RE2::FullMatch("-100",         "(-?\\d+)", &v)); CHECK_EQ(v, -100);
     CHECK(RE2::FullMatch("2147483647",   "(-?\\d+)", &v)); CHECK_EQ(v, max);
@@ -803,8 +810,8 @@ TEST(RE2, FullMatchTypeTests) {
     CHECK(!RE2::FullMatch("000x7fffffff", "(.*)", RE2::CRadix(&v)));
   }
   {
-    uint32 v;
-    static const uint32 max = 0xfffffffful;
+    uint32_t v;
+    static const uint32_t max = UINT32_C(0xffffffff);
     CHECK(RE2::FullMatch("100",         "(\\d+)", &v)); CHECK_EQ(v, 100);
     CHECK(RE2::FullMatch("4294967295",  "(\\d+)", &v)); CHECK_EQ(v, max);
     CHECK(!RE2::FullMatch("4294967296", "(\\d+)", &v));
@@ -813,40 +820,40 @@ TEST(RE2, FullMatchTypeTests) {
     CHECK(RE2::FullMatch(zeros + "4294967295", "(\\d+)", &v)); CHECK_EQ(v, max);
   }
   {
-    int64 v;
-    static const int64 max = 0x7fffffffffffffffull;
-    static const int64 min = -max - 1;
+    int64_t v;
+    static const int64_t max = INT64_C(0x7fffffffffffffff);
+    static const int64_t min = -max - 1;
     char buf[32];
 
     CHECK(RE2::FullMatch("100",  "(-?\\d+)", &v)); CHECK_EQ(v, 100);
     CHECK(RE2::FullMatch("-100", "(-?\\d+)", &v)); CHECK_EQ(v, -100);
 
-    snprintf(buf, sizeof(buf), "%lld", (long long int)max);
+    snprintf(buf, sizeof(buf), "%lld", (long long)max);
     CHECK(RE2::FullMatch(buf,    "(-?\\d+)", &v)); CHECK_EQ(v, max);
 
-    snprintf(buf, sizeof(buf), "%lld", (long long int)min);
+    snprintf(buf, sizeof(buf), "%lld", (long long)min);
     CHECK(RE2::FullMatch(buf,    "(-?\\d+)", &v)); CHECK_EQ(v, min);
 
-    snprintf(buf, sizeof(buf), "%lld", (long long int)max);
+    snprintf(buf, sizeof(buf), "%lld", (long long)max);
     assert(buf[strlen(buf)-1] != '9');
     buf[strlen(buf)-1]++;
     CHECK(!RE2::FullMatch(buf,   "(-?\\d+)", &v));
 
-    snprintf(buf, sizeof(buf), "%lld", (long long int)min);
+    snprintf(buf, sizeof(buf), "%lld", (long long)min);
     assert(buf[strlen(buf)-1] != '9');
     buf[strlen(buf)-1]++;
     CHECK(!RE2::FullMatch(buf,   "(-?\\d+)", &v));
   }
   {
-    uint64 v;
-    int64 v2;
-    static const uint64 max = 0xffffffffffffffffull;
+    uint64_t v;
+    int64_t v2;
+    static const uint64_t max = UINT64_C(0xffffffffffffffff);
     char buf[32];
 
     CHECK(RE2::FullMatch("100",  "(-?\\d+)", &v));  CHECK_EQ(v, 100);
     CHECK(RE2::FullMatch("-100", "(-?\\d+)", &v2)); CHECK_EQ(v2, -100);
 
-    snprintf(buf, sizeof(buf), "%llu", (long long unsigned)max);
+    snprintf(buf, sizeof(buf), "%llu", (unsigned long long)max);
     CHECK(RE2::FullMatch(buf,    "(-?\\d+)", &v)); CHECK_EQ(v, max);
 
     assert(buf[strlen(buf)-1] != '9');
@@ -1411,6 +1418,18 @@ TEST(RE2, UnicodeClasses) {
   EXPECT_EQ("鋒", c);
 }
 
+TEST(RE2, LazyRE2) {
+  // Test with and without options.
+  static LazyRE2 a = {"a"};
+  static LazyRE2 b = {"b", RE2::Latin1};
+
+  EXPECT_EQ("a", a->pattern());
+  EXPECT_EQ(RE2::Options::EncodingUTF8, a->options().encoding());
+
+  EXPECT_EQ("b", b->pattern());
+  EXPECT_EQ(RE2::Options::EncodingLatin1, b->options().encoding());
+}
+
 // Bug reported by saito. 2009/02/17
 TEST(RE2, NullVsEmptyString) {
   RE2 re(".*");
@@ -1486,8 +1505,8 @@ TEST(RE2, CapturingGroupNames) {
   //      12    3        45   6         7
   RE2 re("((abc)(?P<G2>)|((e+)(?P<G2>.*)(?P<G1>u+)))");
   EXPECT_TRUE(re.ok());
-  const map<int, string>& have = re.CapturingGroupNames();
-  map<int, string> want;
+  const std::map<int, string>& have = re.CapturingGroupNames();
+  std::map<int, string> want;
   want[3] = "G2";
   want[6] = "G2";
   want[7] = "G1";
@@ -1593,6 +1612,23 @@ TEST(RE2, Bug26356109) {
 
   CHECK(re.Match(s, 0, static_cast<int>(s.size()), RE2::ANCHOR_BOTH, &m, 1));
   CHECK_EQ(m, s) << " (ANCHOR_BOTH) got m='" << m << "', want '" << s << "'";
+}
+
+TEST(RE2, Issue104) {
+  // RE2::GlobalReplace always advanced by one byte when the empty string was
+  // matched, which would clobber any rune that is longer than one byte.
+
+  string s = "bc";
+  CHECK_EQ(3, RE2::GlobalReplace(&s, "a*", "d"));
+  CHECK_EQ("dbdcd", s);
+
+  s = "ąć";
+  CHECK_EQ(3, RE2::GlobalReplace(&s, "Ć*", "Ĉ"));
+  CHECK_EQ("ĈąĈćĈ", s);
+
+  s = "人类";
+  CHECK_EQ(3, RE2::GlobalReplace(&s, "大*", "小"));
+  CHECK_EQ("小人小类小", s);
 }
 
 }  // namespace re2

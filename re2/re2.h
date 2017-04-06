@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#ifndef RE2_RE2_H
-#define RE2_RE2_H
+#ifndef RE2_RE2_H_
+#define RE2_RE2_H_
 
 // C++ interface to the re2 regular-expression library.
 // RE2 supports Perl-style regular expressions (with extensions like
@@ -179,22 +179,25 @@
 //         RE2::Octal(&a), RE2::Hex(&b), RE2::CRadix(&c), RE2::CRadix(&d));
 // will leave 64 in a, b, c, and d.
 
+#include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
+#include <algorithm>
 #include <map>
 #include <mutex>
 #include <string>
+
 #include "re2/stringpiece.h"
 
-#ifndef RE2_HAVE_LONGLONG
-#define RE2_HAVE_LONGLONG 1
-#endif
+namespace re2 {
+class Prog;
+class Regexp;
+}  // namespace re2
 
 namespace re2 {
 
+// TODO(junyer): Get rid of this.
 using std::string;
-using std::map;
-class Prog;
-class Regexp;
 
 // Interface for regular expression matching.  Also corresponds to a
 // pre-compiled regular expression.  An "RE2" object is safe for
@@ -280,7 +283,7 @@ class RE2 {
   // EXPERIMENTAL! SUBJECT TO CHANGE!
   // Outputs the program fanout as a histogram bucketed by powers of 2.
   // Returns the number of the largest non-empty bucket.
-  int ProgramFanout(map<int, int>* histogram) const;
+  int ProgramFanout(std::map<int, int>* histogram) const;
 
   // Returns the underlying Regexp; not for general use.
   // Returns entire_regexp_ so that callers don't need
@@ -475,12 +478,12 @@ class RE2 {
   // The map records the index of the leftmost group
   // with the given name.
   // Only valid until the re is deleted.
-  const map<string, int>& NamedCapturingGroups() const;
+  const std::map<string, int>& NamedCapturingGroups() const;
 
   // Return a map from capturing indices to names.
   // The map has no entries for unnamed groups.
   // Only valid until the re is deleted.
-  const map<int, string>& CapturingGroupNames() const;
+  const std::map<int, string>& CapturingGroupNames() const;
 
   // General matching routine.
   // Match against text starting at offset startpos
@@ -709,10 +712,8 @@ class RE2 {
   static inline Arg CRadix(unsigned int* x);
   static inline Arg CRadix(long* x);
   static inline Arg CRadix(unsigned long* x);
-  #if RE2_HAVE_LONGLONG
   static inline Arg CRadix(long long* x);
   static inline Arg CRadix(unsigned long long* x);
-  #endif
 
   static inline Arg Hex(short* x);
   static inline Arg Hex(unsigned short* x);
@@ -720,10 +721,8 @@ class RE2 {
   static inline Arg Hex(unsigned int* x);
   static inline Arg Hex(long* x);
   static inline Arg Hex(unsigned long* x);
-  #if RE2_HAVE_LONGLONG
   static inline Arg Hex(long long* x);
   static inline Arg Hex(unsigned long long* x);
-  #endif
 
   static inline Arg Octal(short* x);
   static inline Arg Octal(unsigned short* x);
@@ -731,10 +730,8 @@ class RE2 {
   static inline Arg Octal(unsigned int* x);
   static inline Arg Octal(long* x);
   static inline Arg Octal(unsigned long* x);
-  #if RE2_HAVE_LONGLONG
   static inline Arg Octal(long long* x);
   static inline Arg Octal(unsigned long long* x);
-  #endif
 
  private:
   void Init(const StringPiece& pattern, const Options& options);
@@ -764,10 +761,10 @@ class RE2 {
   mutable int            num_captures_;  // Number of capturing groups
 
   // Map from capture names to indices
-  mutable const map<string, int>* named_groups_;
+  mutable const std::map<string, int>* named_groups_;
 
   // Map from capture indices to names
-  mutable const map<int, string>* group_names_;
+  mutable const std::map<int, string>* group_names_;
 
   int           min_match_length_; // min possible match len
   int           max_match_length_; // max possible match len, -1=unbounded
@@ -809,28 +806,26 @@ class RE2::Arg {
   typedef bool (*Parser)(const char* str, int n, void* dest);
 
 // Type-specific parsers
-#define MAKE_PARSER(type,name) \
-  Arg(type* p) : arg_(p), parser_(name) { } \
-  Arg(type* p, Parser parser) : arg_(p), parser_(parser) { } \
-
+#define MAKE_PARSER(type, name)            \
+  Arg(type* p) : arg_(p), parser_(name) {} \
+  Arg(type* p, Parser parser) : arg_(p), parser_(parser) {}
 
   MAKE_PARSER(char,               parse_char);
-  MAKE_PARSER(signed char,        parse_char);
+  MAKE_PARSER(signed char,        parse_schar);
   MAKE_PARSER(unsigned char,      parse_uchar);
+  MAKE_PARSER(float,              parse_float);
+  MAKE_PARSER(double,             parse_double);
+  MAKE_PARSER(string,             parse_string);
+  MAKE_PARSER(StringPiece,        parse_stringpiece);
+
   MAKE_PARSER(short,              parse_short);
   MAKE_PARSER(unsigned short,     parse_ushort);
   MAKE_PARSER(int,                parse_int);
   MAKE_PARSER(unsigned int,       parse_uint);
   MAKE_PARSER(long,               parse_long);
   MAKE_PARSER(unsigned long,      parse_ulong);
-  #if RE2_HAVE_LONGLONG
   MAKE_PARSER(long long,          parse_longlong);
   MAKE_PARSER(unsigned long long, parse_ulonglong);
-  #endif
-  MAKE_PARSER(float,              parse_float);
-  MAKE_PARSER(double,             parse_double);
-  MAKE_PARSER(string,             parse_string);
-  MAKE_PARSER(StringPiece,        parse_stringpiece);
 
 #undef MAKE_PARSER
 
@@ -849,21 +844,23 @@ class RE2::Arg {
 
   static bool parse_null          (const char* str, int n, void* dest);
   static bool parse_char          (const char* str, int n, void* dest);
+  static bool parse_schar         (const char* str, int n, void* dest);
   static bool parse_uchar         (const char* str, int n, void* dest);
   static bool parse_float         (const char* str, int n, void* dest);
   static bool parse_double        (const char* str, int n, void* dest);
   static bool parse_string        (const char* str, int n, void* dest);
   static bool parse_stringpiece   (const char* str, int n, void* dest);
 
-#define DECLARE_INTEGER_PARSER(name)                                        \
- private:                                                                   \
-  static bool parse_ ## name(const char* str, int n, void* dest);           \
-  static bool parse_ ## name ## _radix(                                     \
-    const char* str, int n, void* dest, int radix);                         \
- public:                                                                    \
-  static bool parse_ ## name ## _hex(const char* str, int n, void* dest);   \
-  static bool parse_ ## name ## _octal(const char* str, int n, void* dest); \
-  static bool parse_ ## name ## _cradix(const char* str, int n, void* dest)
+#define DECLARE_INTEGER_PARSER(name)                                    \
+ private:                                                               \
+  static bool parse_##name(const char* str, int n, void* dest);         \
+  static bool parse_##name##_radix(const char* str, int n, void* dest,  \
+                                   int radix);                          \
+                                                                        \
+ public:                                                                \
+  static bool parse_##name##_hex(const char* str, int n, void* dest);   \
+  static bool parse_##name##_octal(const char* str, int n, void* dest); \
+  static bool parse_##name##_cradix(const char* str, int n, void* dest)
 
   DECLARE_INTEGER_PARSER(short);
   DECLARE_INTEGER_PARSER(ushort);
@@ -871,12 +868,11 @@ class RE2::Arg {
   DECLARE_INTEGER_PARSER(uint);
   DECLARE_INTEGER_PARSER(long);
   DECLARE_INTEGER_PARSER(ulong);
-  #if RE2_HAVE_LONGLONG
   DECLARE_INTEGER_PARSER(longlong);
   DECLARE_INTEGER_PARSER(ulonglong);
-  #endif
 
 #undef DECLARE_INTEGER_PARSER
+
 };
 
 inline RE2::Arg::Arg() : arg_(NULL), parser_(parse_null) { }
@@ -887,13 +883,16 @@ inline bool RE2::Arg::Parse(const char* str, int n) const {
 }
 
 // This part of the parser, appropriate only for ints, deals with bases
-#define MAKE_INTEGER_PARSER(type, name) \
-  inline RE2::Arg RE2::Hex(type* ptr) { \
-    return RE2::Arg(ptr, RE2::Arg::parse_ ## name ## _hex); } \
-  inline RE2::Arg RE2::Octal(type* ptr) { \
-    return RE2::Arg(ptr, RE2::Arg::parse_ ## name ## _octal); } \
-  inline RE2::Arg RE2::CRadix(type* ptr) { \
-    return RE2::Arg(ptr, RE2::Arg::parse_ ## name ## _cradix); }
+#define MAKE_INTEGER_PARSER(type, name)                    \
+  inline RE2::Arg RE2::Hex(type* ptr) {                    \
+    return RE2::Arg(ptr, RE2::Arg::parse_##name##_hex);    \
+  }                                                        \
+  inline RE2::Arg RE2::Octal(type* ptr) {                  \
+    return RE2::Arg(ptr, RE2::Arg::parse_##name##_octal);  \
+  }                                                        \
+  inline RE2::Arg RE2::CRadix(type* ptr) {                 \
+    return RE2::Arg(ptr, RE2::Arg::parse_##name##_cradix); \
+  }
 
 MAKE_INTEGER_PARSER(short,              short)
 MAKE_INTEGER_PARSER(unsigned short,     ushort)
@@ -901,15 +900,62 @@ MAKE_INTEGER_PARSER(int,                int)
 MAKE_INTEGER_PARSER(unsigned int,       uint)
 MAKE_INTEGER_PARSER(long,               long)
 MAKE_INTEGER_PARSER(unsigned long,      ulong)
-#if RE2_HAVE_LONGLONG
 MAKE_INTEGER_PARSER(long long,          longlong)
 MAKE_INTEGER_PARSER(unsigned long long, ulonglong)
-#endif
 
 #undef MAKE_INTEGER_PARSER
+
+#ifndef SWIG
+// Helper for writing global or static RE2s safely.
+// Write
+//     static LazyRE2 re = {".*"};
+// and then use *re instead of writing
+//     static RE2 re(".*");
+// The former is more careful about multithreaded
+// situations than the latter.
+//
+// N.B. This class never deletes the RE2 object that
+// it constructs: that's a feature, so that it can be used
+// for global and function static variables.
+class LazyRE2 {
+ private:
+  struct NoArg {};
+
+ public:
+  typedef RE2 element_type;  // support std::pointer_traits
+
+  // Constructor omitted to preserve braced initialization in C++98.
+
+  // Pretend to be a pointer to Type (never NULL due to on-demand creation):
+  RE2& operator*() const { return *get(); }
+  RE2* operator->() const { return get(); }
+
+  // Named accessor/initializer:
+  RE2* get() const {
+    std::call_once(once_, [this]() { LazyRE2::Init(this); });
+    return ptr_;
+  }
+
+  // All data fields must be public to support {"foo"} initialization.
+  const char* pattern_;
+  RE2::CannedOptions options_;
+  NoArg barrier_against_excess_initializers_;
+
+  mutable RE2* ptr_;
+  mutable std::once_flag once_;
+
+ private:
+  static void Init(const LazyRE2* lazy_re2) {
+    lazy_re2->ptr_ = new RE2(lazy_re2->pattern_, lazy_re2->options_);
+  }
+
+  void operator=(const LazyRE2&);  // disallowed
+};
+#endif  // SWIG
 
 }  // namespace re2
 
 using re2::RE2;
+using re2::LazyRE2;
 
-#endif /* RE2_RE2_H */
+#endif  // RE2_RE2_H_

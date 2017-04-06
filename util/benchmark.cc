@@ -2,6 +2,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#include <stdint.h>
+#include <algorithm>
+#include <chrono>
+
 #include "util/util.h"
 #include "util/flags.h"
 #include "util/benchmark.h"
@@ -10,7 +14,6 @@
 DEFINE_string(test_tmpdir, "/var/tmp", "temp directory");
 
 using testing::Benchmark;
-using namespace re2;
 
 static Benchmark* benchmarks[10000];
 static int nbenchmarks;
@@ -24,42 +27,17 @@ void Benchmark::Register() {
 	nbenchmarks++;
 }
 
-static int64 nsec() {
-#if defined(__APPLE__)
-	struct timeval tv;
-	if(gettimeofday(&tv, 0) < 0)
-		return -1;
-	return (int64)tv.tv_sec*1000*1000*1000 + tv.tv_usec*1000;
-#elif defined(_WIN32)
-	// https://msdn.microsoft.com/en-us/library/windows/desktop/dn553408.aspx
-	// describes how to query ticks and convert to microseconds. Of course,
-	// what we want in this case are nanoseconds. Also, note that .QuadPart
-	// is a signed 64-bit integer, so casting to int64 shouldn't be needed.
-	LARGE_INTEGER freq;
-	QueryPerformanceFrequency(&freq);
-	LARGE_INTEGER ticks;
-	QueryPerformanceCounter(&ticks);
-	ticks.QuadPart *= 1000*1000*1000;
-	ticks.QuadPart /= freq.QuadPart;
-	return ticks.QuadPart;
-#else
-	struct timespec tp;
-#ifdef CLOCK_PROCESS_CPUTIME_ID
-	if(clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &tp) < 0)
-#else
-	if(clock_gettime(CLOCK_REALTIME, &tp) < 0)
-#endif
-		return -1;
-	return (int64)tp.tv_sec*1000*1000*1000 + tp.tv_nsec;
-#endif
+static int64_t nsec() {
+	return std::chrono::duration_cast<std::chrono::nanoseconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-static int64 bytes;
-static int64 ns;
-static int64 t0;
-static int64 items;
+static int64_t bytes;
+static int64_t ns;
+static int64_t t0;
+static int64_t items;
 
-void SetBenchmarkBytesProcessed(long long x) {
+void SetBenchmarkBytesProcessed(int64_t x) {
 	bytes = x;
 }
 
@@ -132,7 +110,7 @@ void RunBench(Benchmark* b, int nthread, int siz) {
 		else
 			n = (int)1e9 / static_cast<int>(ns/n);
 		
-		n = max(last+1, min(n+n/2, 100*last));
+		n = std::max(last+1, std::min(n+n/2, 100*last));
 		n = round(n);
 		runN(b, n, siz);
 	}
@@ -169,7 +147,7 @@ int main(int argc, const char** argv) {
 		Benchmark* b = benchmarks[i];
 		if(match(b->name, argc, argv))
 			for(int j = b->threadlo; j <= b->threadhi; j++)
-				for(int k = max(b->lo, 1); k <= max(b->hi, 1); k<<=1)
+				for(int k = std::max(b->lo, 1); k <= std::max(b->hi, 1); k<<=1)
 					RunBench(b, j, k);
 	}
 }

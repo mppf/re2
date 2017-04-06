@@ -4,7 +4,14 @@
 
 // Benchmarks for regular expression implementations.
 
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string>
+#include <utility>
+
 #include "util/test.h"
+#include "util/strutil.h"
 #include "re2/prog.h"
 #include "re2/re2.h"
 #include "re2/regexp.h"
@@ -156,7 +163,7 @@ void Search(int iters, int nbytes, const char* regexp, SearchImpl* search) {
   BenchmarkMemoryUsage();
   StartBenchmarkTiming();
   search(iters, regexp, s, Prog::kUnanchored, false);
-  SetBenchmarkBytesProcessed(static_cast<int64>(iters)*nbytes);
+  SetBenchmarkBytesProcessed(static_cast<int64_t>(iters)*nbytes);
 }
 
 // These two are easy because they start with an A,
@@ -265,7 +272,7 @@ void SearchBigFixed(int iters, int nbytes, SearchImpl* search) {
   BenchmarkMemoryUsage();
   StartBenchmarkTiming();
   search(iters, regexp.c_str(), s, Prog::kUnanchored, true);
-  SetBenchmarkBytesProcessed(static_cast<int64>(iters)*nbytes);
+  SetBenchmarkBytesProcessed(static_cast<int64_t>(iters)*nbytes);
 }
 
 void Search_BigFixed_CachedDFA(int i, int n)     { SearchBigFixed(i, n, SearchCachedDFA); }
@@ -295,7 +302,7 @@ void FindAndConsume(int iters, int nbytes) {
     CHECK(RE2::FindAndConsume(&t, re, &u));
     CHECK_EQ(u, "Hello World");
   }
-  SetBenchmarkBytesProcessed(static_cast<int64>(iters)*nbytes);
+  SetBenchmarkBytesProcessed(static_cast<int64_t>(iters)*nbytes);
 }
 
 BENCHMARK_RANGE(FindAndConsume, 8, 16<<20)->ThreadRange(1, NumCPUs());
@@ -309,7 +316,7 @@ void SearchSuccess(int iters, int nbytes, const char* regexp, SearchImpl* search
   BenchmarkMemoryUsage();
   StartBenchmarkTiming();
   search(iters, regexp, s, Prog::kAnchored, true);
-  SetBenchmarkBytesProcessed(static_cast<int64>(iters)*nbytes);
+  SetBenchmarkBytesProcessed(static_cast<int64_t>(iters)*nbytes);
 }
 
 // Unambiguous search (RE2 can use OnePass).
@@ -383,7 +390,7 @@ void SearchAltMatch(int iters, int nbytes, SearchImpl* search) {
   BenchmarkMemoryUsage();
   StartBenchmarkTiming();
   search(iters, "\\C*", s, Prog::kAnchored, true);
-  SetBenchmarkBytesProcessed(static_cast<int64>(iters)*nbytes);
+  SetBenchmarkBytesProcessed(static_cast<int64_t>(iters)*nbytes);
 }
 
 void Search_AltMatch_DFA(int i, int n)      { SearchAltMatch(i, n, SearchDFA); }
@@ -771,7 +778,7 @@ void SearchPhone(int iters, int nbytes, ParseImpl* search) {
   BenchmarkMemoryUsage();
   StartBenchmarkTiming();
   search(iters, "(\\d{3}-|\\(\\d{3}\\)\\s+)(\\d{3}-\\d{4})", s);
-  SetBenchmarkBytesProcessed(static_cast<int64>(iters)*nbytes);
+  SetBenchmarkBytesProcessed(static_cast<int64_t>(iters)*nbytes);
 }
 
 void SearchPhone_CachedPCRE(int i, int n) {
@@ -798,7 +805,7 @@ static string DeBruijnString(int n) {
   CHECK_LT(n, 8*sizeof(int));
   CHECK_GT(n, 0);
 
-  vector<bool> did(1<<n);
+  std::vector<bool> did(1<<n);
   for (int i = 0; i < 1<<n; i++)
     did[i] = false;
 
@@ -827,11 +834,12 @@ void CacheFill(int iters, int n, SearchImpl *srch) {
   string t;
   for (int i = n+1; i < 20; i++) {
     t = s + s;
+    using std::swap;
     swap(s, t);
   }
   srch(iters, StringPrintf("0[01]{%d}$", n).c_str(), s,
        Prog::kUnanchored, true);
-  SetBenchmarkBytesProcessed(static_cast<int64>(iters)*s.size());
+  SetBenchmarkBytesProcessed(static_cast<int64_t>(iters)*s.size());
 }
 
 void CacheFillPCRE(int i, int n) { CacheFill(i, n, SearchCachedPCRE); }
@@ -1492,7 +1500,7 @@ void FullMatchPCRE(int iter, int n, const char *regexp) {
   StartBenchmarkTiming();
   for (int i = 0; i < iter; i++)
     CHECK(PCRE::FullMatch(s, re));
-  SetBenchmarkBytesProcessed(static_cast<int64>(iter)*n);
+  SetBenchmarkBytesProcessed(static_cast<int64_t>(iter)*n);
 }
 
 void FullMatchRE2(int iter, int n, const char *regexp) {
@@ -1505,7 +1513,7 @@ void FullMatchRE2(int iter, int n, const char *regexp) {
   StartBenchmarkTiming();
   for (int i = 0; i < iter; i++)
     CHECK(RE2::FullMatch(s, re));
-  SetBenchmarkBytesProcessed(static_cast<int64>(iter)*n);
+  SetBenchmarkBytesProcessed(static_cast<int64_t>(iter)*n);
 }
 
 void FullMatch_DotStar_CachedPCRE(int i, int n) { FullMatchPCRE(i, n, "(?s).*"); }

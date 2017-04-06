@@ -8,9 +8,12 @@
 
 #include <errno.h>
 #include <limits>
+#include <utility>
+
 #include "util/util.h"
 #include "util/flags.h"
 #include "util/pcre.h"
+#include "util/strutil.h"
 
 #define PCREPORT(level) LOG(level)
 
@@ -431,6 +434,7 @@ int PCRE::GlobalReplace(string *str,
 
   if (start < static_cast<int>(str->size()))
     out.append(*str, start, static_cast<int>(str->size()) - start);
+  using std::swap;
   swap(out, *str);
   return count;
 }
@@ -754,6 +758,13 @@ bool PCRE::Arg::parse_char(const char* str, int n, void* dest) {
   return true;
 }
 
+bool PCRE::Arg::parse_schar(const char* str, int n, void* dest) {
+  if (n != 1) return false;
+  if (dest == NULL) return true;
+  *(reinterpret_cast<signed char*>(dest)) = str[0];
+  return true;
+}
+
 bool PCRE::Arg::parse_uchar(const char* str, int n, void* dest) {
   if (n != 1) return false;
   if (dest == NULL) return true;
@@ -838,8 +849,8 @@ bool PCRE::Arg::parse_short_radix(const char* str,
                                 void* dest,
                                 int radix) {
   long r;
-  if (!parse_long_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((short)r != r) return false;       // Out of range
+  if (!parse_long_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((short)r != r) return false;                         // Out of range
   if (dest == NULL) return true;
   *(reinterpret_cast<short*>(dest)) = (short)r;
   return true;
@@ -850,10 +861,10 @@ bool PCRE::Arg::parse_ushort_radix(const char* str,
                                  void* dest,
                                  int radix) {
   unsigned long r;
-  if (!parse_ulong_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((ushort)r != r) return false;                      // Out of range
+  if (!parse_ulong_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((unsigned short)r != r) return false;                 // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<unsigned short*>(dest)) = (ushort)r;
+  *(reinterpret_cast<unsigned short*>(dest)) = (unsigned short)r;
   return true;
 }
 
@@ -862,10 +873,10 @@ bool PCRE::Arg::parse_int_radix(const char* str,
                               void* dest,
                               int radix) {
   long r;
-  if (!parse_long_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((int)r != r) return false;         // Out of range
+  if (!parse_long_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((int)r != r) return false;                           // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<int*>(dest)) = r;
+  *(reinterpret_cast<int*>(dest)) = (int)r;
   return true;
 }
 
@@ -874,10 +885,10 @@ bool PCRE::Arg::parse_uint_radix(const char* str,
                                void* dest,
                                int radix) {
   unsigned long r;
-  if (!parse_ulong_radix(str, n, &r, radix)) return false; // Could not parse
-  if ((uint)r != r) return false;                       // Out of range
+  if (!parse_ulong_radix(str, n, &r, radix)) return false;  // Could not parse
+  if ((unsigned int)r != r) return false;                   // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<unsigned int*>(dest)) = r;
+  *(reinterpret_cast<unsigned int*>(dest)) = (unsigned int)r;
   return true;
 }
 
@@ -890,11 +901,11 @@ bool PCRE::Arg::parse_longlong_radix(const char* str,
   str = TerminateNumber(buf, str, n);
   char* end;
   errno = 0;
-  int64 r = strtoll(str, &end, radix);
+  long long r = strtoll(str, &end, radix);
   if (end != str + n) return false;   // Leftover junk
   if (errno) return false;
   if (dest == NULL) return true;
-  *(reinterpret_cast<int64*>(dest)) = r;
+  *(reinterpret_cast<long long*>(dest)) = r;
   return true;
 }
 
@@ -912,11 +923,11 @@ bool PCRE::Arg::parse_ulonglong_radix(const char* str,
   }
   char* end;
   errno = 0;
-  uint64 r = strtoull(str, &end, radix);
+  unsigned long long r = strtoull(str, &end, radix);
   if (end != str + n) return false;   // Leftover junk
   if (errno) return false;
   if (dest == NULL) return true;
-  *(reinterpret_cast<uint64*>(dest)) = r;
+  *(reinterpret_cast<unsigned long long*>(dest)) = r;
   return true;
 }
 
@@ -970,30 +981,29 @@ bool PCRE::Arg::parse_float(const char* str, int n, void* dest) {
   return true;
 }
 
-
-#define DEFINE_INTEGER_PARSERS(name)                                        \
+#define DEFINE_INTEGER_PARSER(name)                                           \
   bool PCRE::Arg::parse_##name(const char* str, int n, void* dest) {          \
-    return parse_##name##_radix(str, n, dest, 10);                          \
-  }                                                                         \
+    return parse_##name##_radix(str, n, dest, 10);                            \
+  }                                                                           \
   bool PCRE::Arg::parse_##name##_hex(const char* str, int n, void* dest) {    \
-    return parse_##name##_radix(str, n, dest, 16);                          \
-  }                                                                         \
+    return parse_##name##_radix(str, n, dest, 16);                            \
+  }                                                                           \
   bool PCRE::Arg::parse_##name##_octal(const char* str, int n, void* dest) {  \
-    return parse_##name##_radix(str, n, dest, 8);                           \
-  }                                                                         \
+    return parse_##name##_radix(str, n, dest, 8);                             \
+  }                                                                           \
   bool PCRE::Arg::parse_##name##_cradix(const char* str, int n, void* dest) { \
-    return parse_##name##_radix(str, n, dest, 0);                           \
+    return parse_##name##_radix(str, n, dest, 0);                             \
   }
 
-DEFINE_INTEGER_PARSERS(short);
-DEFINE_INTEGER_PARSERS(ushort);
-DEFINE_INTEGER_PARSERS(int);
-DEFINE_INTEGER_PARSERS(uint);
-DEFINE_INTEGER_PARSERS(long);
-DEFINE_INTEGER_PARSERS(ulong);
-DEFINE_INTEGER_PARSERS(longlong);
-DEFINE_INTEGER_PARSERS(ulonglong);
+DEFINE_INTEGER_PARSER(short);
+DEFINE_INTEGER_PARSER(ushort);
+DEFINE_INTEGER_PARSER(int);
+DEFINE_INTEGER_PARSER(uint);
+DEFINE_INTEGER_PARSER(long);
+DEFINE_INTEGER_PARSER(ulong);
+DEFINE_INTEGER_PARSER(longlong);
+DEFINE_INTEGER_PARSER(ulonglong);
 
-#undef DEFINE_INTEGER_PARSERS
+#undef DEFINE_INTEGER_PARSER
 
 }  // namespace re2

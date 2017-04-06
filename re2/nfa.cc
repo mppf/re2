@@ -24,10 +24,18 @@
 // Like Thompson's original machine and like the DFA implementation, this
 // implementation notices a match only once it is one byte past it.
 
+#include <stdio.h>
+#include <string.h>
+#include <algorithm>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "re2/prog.h"
 #include "re2/regexp.h"
 #include "util/sparse_array.h"
 #include "util/sparse_set.h"
+#include "util/strutil.h"
 
 namespace re2 {
 
@@ -293,7 +301,7 @@ void NFA::AddToThreadq(Threadq* q, int id0, int c, int flag,
     case kInstByteRange:
       if (!ip->Matches(c))
         goto Next;
-      // Fallthrough intended.
+      FALLTHROUGH_INTENDED;
 
     case kInstMatch:
       // Save state; will pick up at next byte.
@@ -561,6 +569,7 @@ bool NFA::Search(const StrPiece& text, const StrPiece& const_context,
     // This is a no-op the first time around the loop because runq is empty.
     int id = Step(runq, nextq, p < text.end() ? p[0] & 0xFF : -1, flag, p-1);
     DCHECK_EQ(runq->size(), 0);
+    using std::swap;
     swap(nextq, runq);
     nextq->clear();
     if (id != 0) {

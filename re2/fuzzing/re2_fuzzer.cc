@@ -4,7 +4,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-
 #include <map>
 #include <string>
 
@@ -13,7 +12,6 @@
 
 using re2::FLAGS_minloglevel;
 using re2::StringPiece;
-using std::map;
 using std::string;
 
 // NOT static, NOT signed.
@@ -25,7 +23,7 @@ void Test(StringPiece pattern, const RE2::Options& options, StringPiece text) {
     return;
 
   // Don't waste time fuzzing high-fanout programs.
-  map<int, int> histogram;
+  std::map<int, int> histogram;
   int fanout = re.ProgramFanout(&histogram);
   if (fanout > 10)
     return;
@@ -53,7 +51,7 @@ void Test(StringPiece pattern, const RE2::Options& options, StringPiece text) {
 
 // Entry point for libFuzzer.
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  if (size == 0)
+  if (size == 0 || size > 1000000)
     return 0;
 
   // Suppress logging below FATAL severity.

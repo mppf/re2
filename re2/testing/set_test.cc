@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <stddef.h>
 #include <vector>
 
 #include "util/test.h"
@@ -24,7 +23,7 @@ TEST(Set, Unanchored) {
   CHECK_EQ(s.Match("fooba", NULL), true);
   CHECK_EQ(s.Match("oobar", NULL), true);
 
-  vector<int> v;
+  std::vector<int> v;
   CHECK_EQ(s.Match("foobar", &v), true);
   CHECK_EQ(v.size(), 2);
   CHECK_EQ(v[0], 0);
@@ -52,7 +51,7 @@ TEST(Set, UnanchoredFactored) {
   CHECK_EQ(s.Match("fooba", NULL), true);
   CHECK_EQ(s.Match("oobar", NULL), false);
 
-  vector<int> v;
+  std::vector<int> v;
   CHECK_EQ(s.Match("foobar", &v), true);
   CHECK_EQ(v.size(), 2);
   CHECK_EQ(v[0], 0);
@@ -79,7 +78,7 @@ TEST(Set, UnanchoredDollar) {
 
   CHECK_EQ(s.Match("foo", NULL), true);
 
-  vector<int> v;
+  std::vector<int> v;
   CHECK_EQ(s.Match("foo", &v), true);
   CHECK_EQ(v.size(), 1);
   CHECK_EQ(v[0], 0);
@@ -99,7 +98,7 @@ TEST(Set, Anchored) {
   CHECK_EQ(s.Match("foo", NULL), true);
   CHECK_EQ(s.Match("bar", NULL), true);
 
-  vector<int> v;
+  std::vector<int> v;
   CHECK_EQ(s.Match("foobar", &v), false);
   CHECK_EQ(v.size(), 0);
 
@@ -126,7 +125,7 @@ TEST(Set, EmptyUnanchored) {
   CHECK_EQ(s.Match("", NULL), false);
   CHECK_EQ(s.Match("foobar", NULL), false);
 
-  vector<int> v;
+  std::vector<int> v;
   CHECK_EQ(s.Match("", &v), false);
   CHECK_EQ(v.size(), 0);
 
@@ -142,7 +141,7 @@ TEST(Set, EmptyAnchored) {
   CHECK_EQ(s.Match("", NULL), false);
   CHECK_EQ(s.Match("foobar", NULL), false);
 
-  vector<int> v;
+  std::vector<int> v;
   CHECK_EQ(s.Match("", &v), false);
   CHECK_EQ(v.size(), 0);
 
@@ -160,7 +159,7 @@ TEST(Set, Prefix) {
   CHECK_EQ(s.Match("/prefix/", NULL), true);
   CHECK_EQ(s.Match("/prefix/42", NULL), true);
 
-  vector<int> v;
+  std::vector<int> v;
   CHECK_EQ(s.Match("/prefix", &v), false);
   CHECK_EQ(v.size(), 0);
 

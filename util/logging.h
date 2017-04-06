@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#ifndef UTIL_LOGGING_H_
+#define UTIL_LOGGING_H_
+
 // Simplified version of Google's logging.
 
-#ifndef RE2_UTIL_LOGGING_H__
-#define RE2_UTIL_LOGGING_H__
-
+#include <assert.h>
 #include <stdio.h>  /* for fwrite */
 #include <sstream>
 
@@ -76,7 +77,7 @@ class LogMessage {
       Flush();
     }
   }
-  ostream& stream() { return str_; }
+  std::ostream& stream() { return str_; }
 
  private:
   const int severity_;
@@ -106,4 +107,4 @@ class LogMessageFatal : public LogMessage {
 #pragma warning(pop)
 #endif
 
-#endif  // RE2_UTIL_LOGGING_H__
+#endif  // UTIL_LOGGING_H_
