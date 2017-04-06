@@ -5,10 +5,13 @@
 
 // TODO: Test extractions for PartialMatch/Consume
 
-#include <sys/types.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
 #include <errno.h>
+#include <unistd.h>  /* for sysconf */
+#if defined(_POSIX_MAPPED_FILES) && _POSIX_MAPPED_FILES > 0
+#include <sys/mman.h>
+#endif
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <vector>
 #include "util/test.h"
 #include "re2/re2.h"
@@ -385,8 +388,8 @@ static void TestQuoteMeta(string unquoted,
                           const RE2::Options& options = RE2::DefaultOptions) {
   string quoted = RE2::QuoteMeta(unquoted);
   RE2 re(quoted, options);
-  EXPECT_TRUE_M(RE2::FullMatch(unquoted, re),
-                "Unquoted='" + unquoted + "', quoted='" + quoted + "'.");
+  EXPECT_TRUE(RE2::FullMatch(unquoted, re))
+      << "Unquoted='" << unquoted << "', quoted='" << quoted << "'.";
 }
 
 // A meta-quoted string, interpreted as a pattern, should always match
@@ -395,8 +398,8 @@ static void NegativeTestQuoteMeta(string unquoted, string should_not_match,
                                   const RE2::Options& options = RE2::DefaultOptions) {
   string quoted = RE2::QuoteMeta(unquoted);
   RE2 re(quoted, options);
-  EXPECT_FALSE_M(RE2::FullMatch(should_not_match, re),
-                 "Unquoted='" + unquoted + "', quoted='" + quoted + "'.");
+  EXPECT_FALSE(RE2::FullMatch(should_not_match, re))
+      << "Unquoted='" << unquoted << "', quoted='" << quoted << "'.";
 }
 
 // Tests that quoted meta characters match their original strings,
@@ -727,7 +730,10 @@ TEST(RE2, FullMatchTypedNullArg) {
 
 // Check that numeric parsing code does not read past the end of
 // the number being parsed.
+// This implementation requires mmap(2) et al. and thus cannot
+// be used unless they are available.
 TEST(RE2, NULTerminated) {
+#if defined(_POSIX_MAPPED_FILES) && _POSIX_MAPPED_FILES > 0
   char *v;
   int x;
   long pagesize = sysconf(_SC_PAGE_SIZE);
@@ -745,6 +751,7 @@ TEST(RE2, NULTerminated) {
   x = 0;
   CHECK(RE2::FullMatch(StringPiece(v + pagesize - 1, 1), "(.*)", &x));
   CHECK_EQ(x, 1);
+#endif
 }
 
 TEST(RE2, FullMatchTypeTests) {

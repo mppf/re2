@@ -7,7 +7,7 @@
 #ifndef RE2_UTIL_LOGGING_H__
 #define RE2_UTIL_LOGGING_H__
 
-#include <unistd.h>  /* for write */
+#include <stdio.h>  /* for fwrite */
 #include <sstream>
 
 // Debug-only checking.
@@ -34,6 +34,11 @@
 #define LOG_FATAL LogMessageFatal(__FILE__, __LINE__)
 #define LOG_QFATAL LOG_FATAL
 
+// It seems that one of the Windows header files defines ERROR as 0.
+#ifdef _WIN32
+#define LOG_0 LOG_INFO
+#endif
+
 #define VLOG(x) if((x)>0){}else LOG_INFO.stream()
 
 #ifdef NDEBUG
@@ -54,8 +59,8 @@ class LogMessage {
   void Flush() {
     stream() << "\n";
     string s = str_.str();
-    int n = (int)s.size(); // shut up msvc
-    if(write(2, s.data(), n) < 0) {}  // shut up gcc
+    size_t n = s.size();
+    if (fwrite(s.data(), 1, n, stderr) < n) {}  // shut up gcc
     flushed_ = true;
   }
   ~LogMessage() {
@@ -64,7 +69,7 @@ class LogMessage {
     }
   }
   ostream& stream() { return str_; }
- 
+
  private:
   bool flushed_;
   std::ostringstream str_;

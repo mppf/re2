@@ -11,7 +11,6 @@
 
 #include <stdio.h>
 #include <string>
-#include <pthread.h>
 #include <errno.h>
 #include "util/atomicops.h"
 #include "util/util.h"
@@ -34,9 +33,9 @@ const VariadicFunction2<bool, StringPiece*, const RE2&, RE2::Arg, RE2::ConsumeN>
 const VariadicFunction2<bool, StringPiece*, const RE2&, RE2::Arg, RE2::FindAndConsumeN> RE2::FindAndConsume = {};
 
 // This will trigger LNK2005 error in MSVC.
-#ifndef COMPILER_MSVC
+#ifndef _MSC_VER
 const int RE2::Options::kDefaultMaxMem;  // initialized in re2.h
-#endif  // COMPILER_MSVC
+#endif  // _MSC_VER
 
 RE2::Options::Options(RE2::CannedOptions opt)
   : encoding_(opt == RE2::Latin1 ? EncodingLatin1 : EncodingUTF8),
@@ -1020,31 +1019,30 @@ bool RE2::Rewrite(string *out, const StringPiece &rewrite,
                  const StringPiece *vec, int veclen) const {
   for (const char *s = rewrite.data(), *end = s + rewrite.size();
        s < end; s++) {
-    int c = *s;
-    if (c == '\\') {
-      s++;
-      c = (s < end) ? *s : -1;
-      if (isdigit(c)) {
-        int n = (c - '0');
-        if (n >= veclen) {
-          if (options_.log_errors()) {
-            LOG(ERROR) << "requested group " << n
-                       << " in regexp " << rewrite.data();
-          }
-          return false;
+    if (*s != '\\') {
+      out->push_back(*s);
+      continue;
+    }
+    s++;
+    int c = (s < end) ? *s : -1;
+    if (isdigit(c)) {
+      int n = (c - '0');
+      if (n >= veclen) {
+        if (options_.log_errors()) {
+          LOG(ERROR) << "requested group " << n
+                     << " in regexp " << rewrite.data();
         }
-        StringPiece snip = vec[n];
-        if (snip.size() > 0)
-          out->append(snip.data(), snip.size());
-      } else if (c == '\\') {
-        out->push_back('\\');
-      } else {
-        if (options_.log_errors())
-          LOG(ERROR) << "invalid rewrite pattern: " << rewrite.data();
         return false;
       }
+      StringPiece snip = vec[n];
+      if (snip.size() > 0)
+        out->append(snip.data(), snip.size());
+    } else if (c == '\\') {
+      out->push_back('\\');
     } else {
-      out->push_back(c);
+      if (options_.log_errors())
+        LOG(ERROR) << "invalid rewrite pattern: " << rewrite.data();
+      return false;
     }
   }
   return true;
@@ -1243,7 +1241,7 @@ bool RE2::Arg::parse_short_radix(const char* str,
   if (!parse_long_radix(str, n, &r, radix)) return false; // Could not parse
   if ((short)r != r) return false;       // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<short*>(dest)) = r;
+  *(reinterpret_cast<short*>(dest)) = (short)r;
   return true;
 }
 
@@ -1255,7 +1253,7 @@ bool RE2::Arg::parse_ushort_radix(const char* str,
   if (!parse_ulong_radix(str, n, &r, radix)) return false; // Could not parse
   if ((ushort)r != r) return false;                      // Out of range
   if (dest == NULL) return true;
-  *(reinterpret_cast<unsigned short*>(dest)) = r;
+  *(reinterpret_cast<unsigned short*>(dest)) = (ushort)r;
   return true;
 }
 
@@ -1341,7 +1339,7 @@ static bool parse_double_float(const char* str, int n, bool isfloat, void *dest)
   if (errno) return false;
   if (dest == NULL) return true;
   if (isfloat) {
-    *(reinterpret_cast<float*>(dest)) = r;
+    *(reinterpret_cast<float*>(dest)) = (float)r;
   } else {
     *(reinterpret_cast<double*>(dest)) = r;
   }

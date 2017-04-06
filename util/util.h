@@ -12,10 +12,10 @@
 #include <stddef.h>     // For size_t
 #include <assert.h>
 #include <stdarg.h>
-#include <time.h>
+#include <time.h>       // For clock_gettime, CLOCK_REALTIME
 #include <ctype.h>      // For isdigit, isalpha
 
-#if !defined(WIN32)
+#if !defined(_WIN32)
 #include <sys/time.h>   // For gettimeofday
 #endif
 
@@ -53,7 +53,7 @@ using std::tr1::unordered_set;
 #else
 
 #include <unordered_set>
-#if defined(WIN32)
+#if defined(_WIN32)
 using std::tr1::unordered_set;
 #else
 using std::unordered_set;
@@ -61,10 +61,9 @@ using std::unordered_set;
 
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 
 #define snprintf _snprintf_s
-#define sprintf sprintf_s
 #define stricmp _stricmp
 #define strtof strtod /* not really correct but best we can do */
 #define strtoll _strtoi64
@@ -72,7 +71,6 @@ using std::unordered_set;
 #define vsnprintf vsnprintf_s
 
 #pragma warning(disable: 4018) // signed/unsigned mismatch
-#pragma warning(disable: 4244) // possible data loss in int conversion
 #pragma warning(disable: 4800) // conversion from int to bool
 
 #endif
