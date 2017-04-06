@@ -37,8 +37,8 @@ class NFA {
   typedef typename StrPiece::ptr_type ptr_type;
   typedef typename StrPiece::ptr_rd_type ptr_rd_type;
 
-  //NFA(Prog* prog);
-  //~NFA();
+  NFA(Prog* prog);
+  ~NFA();
 
   // Searches for a matching string.
   //   * If anchored is true, only considers matches starting at offset.
@@ -51,9 +51,9 @@ class NFA {
   // Submatch[0] is the entire match.  When there is a choice in
   // which text matches each subexpression, the submatch boundaries
   // are chosen to match what a backtracking implementation would choose.
-  //bool Search(const StrPiece& text, const StrPiece& context,
-  //            bool anchored, bool longest,
-  //            StrPiece* submatch, int nsubmatch);
+  bool Search(const StrPiece& text, const StrPiece& context,
+              bool anchored, bool longest,
+              StrPiece* submatch, int nsubmatch);
 
   static const int Debug = 0;
 
@@ -86,13 +86,13 @@ class NFA {
   typedef SparseArray<Thread*> Threadq;
   typedef typename Threadq::iterator Threadq_iterator;
 
-  //inline Thread* AllocThread();
-  //inline void FreeThread(Thread*);
+  inline Thread* AllocThread();
+  inline void FreeThread(Thread*);
 
   // Add id (or its children, following unlabeled arrows)
   // to the workqueue q with associated capture info.
-  //void AddToThreadq(Threadq* q, int id, int flag,
-  //                  const char* p, const char** capture);
+  void AddToThreadq(Threadq* q, int id, int flag,
+                    const char* p, const char** capture);
 
   // Run runq on byte c, appending new states to nextq.
   // Updates matched_ and match_ as new, better matches are found.
@@ -100,16 +100,16 @@ class NFA {
   // in the input string, used when processing capturing parens.
   // flag is the bitwise or of Bol, Eol, etc., specifying whether
   // ^, $ and \b match the current input point (after c).
-  //inline int Step(Threadq* runq, Threadq* nextq, int c, int flag, const char* p);
+  inline int Step(Threadq* runq, Threadq* nextq, int c, int flag, const char* p);
 
   // Returns text version of capture information, for debugging.
-  //string FormatCapture(const char** capture);
+  string FormatCapture(const char** capture);
 
-  //inline void CopyCapture(const char** dst, const char** src);
+  inline void CopyCapture(const char** dst, const char** src);
 
   // Computes whether all matches must begin with the same first
   // byte, and if so, returns that byte.  If not, returns -1.
-  //int ComputeFirstByte();
+  int ComputeFirstByte();
 
   Prog* prog_;          // underlying program
   int start_;           // start instruction in program
@@ -128,10 +128,9 @@ class NFA {
   Thread* free_threads_;  // free list
 
   DISALLOW_COPY_AND_ASSIGN(NFA);
+};
 
-  // Begin member function definitions.
- public:
-NFA(Prog* prog) {
+NFA::NFA(Prog* prog) {
   prog_ = prog;
   start_ = prog->start();
   ncapture_ = 0;
@@ -149,7 +148,7 @@ NFA(Prog* prog) {
   first_byte_ = ComputeFirstByte();
 }
 
-~NFA() {
+NFA::~NFA() {
   delete[] match_;
   delete[] astack_;
   Thread* next;
@@ -160,17 +159,14 @@ NFA(Prog* prog) {
   }
 }
 
- private:
-inline
-void FreeThread(Thread *t) {
+void NFA::FreeThread(Thread *t) {
   if (t == NULL)
     return;
   t->next = free_threads_;
   free_threads_ = t;
 }
 
-inline
-Thread* AllocThread() {
+NFA::Thread* NFA::AllocThread() {
   Thread* t = free_threads_;
   if (t == NULL) {
     t = new Thread;
@@ -181,8 +177,7 @@ Thread* AllocThread() {
   return t;
 }
 
-inline
-void CopyCapture(ptr_type* dst, ptr_type* src) {
+void NFA::CopyCapture(ptr_type* dst, ptr_type* src) {
   for (int i = 0; i < ncapture_; i+=2) {
     dst[i] = src[i];
     dst[i+1] = src[i+1];
@@ -193,8 +188,8 @@ void CopyCapture(ptr_type* dst, ptr_type* src) {
 // The bits in flag (Bol, Eol, etc.) specify whether ^, $ and \b match.
 // The pointer p is the current input position, and m is the
 // current set of match boundaries.
-void AddToThreadq(Threadq* q, int id0, int flag,
-                  ptr_type p, ptr_type* capture) {
+void NFA::AddToThreadq(Threadq* q, int id0, int flag,
+                       ptr_type p, ptr_type* capture) {
   if (id0 == 0)
     return;
 
@@ -299,8 +294,7 @@ void AddToThreadq(Threadq* q, int id0, int flag,
 // ^, $ and \b match the current input point (after c).
 // Frees all the threads on runq.
 // If there is a shortcut to the end, returns that shortcut.
-inline
-int Step(Threadq* runq, Threadq* nextq, int c, int flag, ptr_type p) {
+int NFA::Step(Threadq* runq, Threadq* nextq, int c, int flag, ptr_type p) {
   nextq->clear();
 
   for (Threadq_iterator i = runq->begin(); i != runq->end(); ++i) {
@@ -386,7 +380,7 @@ int Step(Threadq* runq, Threadq* nextq, int c, int flag, ptr_type p) {
   return 0;
 }
 
-string FormatCapture(ptr_type* capture) {
+string NFA::FormatCapture(ptr_type* capture) {
   string s;
 
   for (int i = 0; i < ncapture_; i+=2) {
@@ -408,8 +402,7 @@ static bool StringPieceContains(const StrPiece haystack, const StrPiece needle) 
          needle.end() <= haystack.end();
 }
 
- public:
-bool Search(const StrPiece& text, const StrPiece& const_context,
+bool NFA::Search(const StrPiece& text, const StrPiece& const_context,
             bool anchored, bool longest,
             StrPiece* submatch, int nsubmatch) {
   if (start_ == 0)
@@ -683,10 +676,9 @@ bool Search(const StrPiece& text, const StrPiece& const_context,
   return false;
 }
 
- private:
 // Computes whether all successful matches have a common first byte,
 // and if so, returns that byte.  If not, returns -1.
-int ComputeFirstByte() {
+int NFA::ComputeFirstByte() {
   if (start_ == 0)
     return -1;
 
@@ -747,9 +739,6 @@ int ComputeFirstByte() {
   }
   return b;
 }
-
-
-}; // end NFA class body
 
 template<typename StrPiece>
 bool Prog::SearchNFA(const StrPiece& text, const StrPiece& context,
