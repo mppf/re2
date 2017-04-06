@@ -32,6 +32,7 @@
 #include <set>
 #include <atomic>
 #include <mutex>        // For std::call_once
+#include <unordered_set>
 
 // Use std names.
 using std::set;
@@ -46,22 +47,7 @@ using std::stack;
 using std::sort;
 using std::swap;
 using std::make_pair;
-
-#if defined(__GNUC__) && !defined(USE_CXX0X) && !defined(_LIBCPP_ABI_VERSION)
-
-#include <tr1/unordered_set>
-using std::tr1::unordered_set;
-
-#else
-
-#include <unordered_set>
-#if defined(_WIN32)
-using std::tr1::unordered_set;
-#else
 using std::unordered_set;
-#endif
-
-#endif
 
 #ifdef _WIN32
 
@@ -71,6 +57,8 @@ using std::unordered_set;
 #define strtoll _strtoi64
 #define strtoull _strtoui64
 #define vsnprintf vsnprintf_s
+
+#pragma warning(disable: 4200) // zero-sized array
 
 #endif
 

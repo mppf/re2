@@ -184,7 +184,6 @@
 #include <mutex>
 #include <string>
 #include "re2/stringpiece.h"
-#include "re2/variadic_function.h"
 
 #ifndef RE2_HAVE_LONGLONG
 #define RE2_HAVE_LONGLONG 1
@@ -251,7 +250,7 @@ class RE2 {
   RE2(const string& pattern);
 #endif
   RE2(const StringPiece& pattern);
-  RE2(const StringPiece& pattern, const Options& option);
+  RE2(const StringPiece& pattern, const Options& options);
   ~RE2();
 
   // Returns whether RE2 was created properly.
@@ -297,11 +296,11 @@ class RE2 {
 
   /***** The useful part: the matching interface *****/
 
-  // Matches "text" against "pattern".  If pointer arguments are
+  // Matches "text" against "re".  If pointer arguments are
   // supplied, copies matched sub-patterns into them.
   //
   // You can pass in a "const char*" or a "string" for "text".
-  // You can pass in a "const char*" or a "string" or a "RE2" for "pattern".
+  // You can pass in a "const char*" or a "string" or a "RE2" for "re".
   //
   // The provided pointer arguments can be pointers to any scalar numeric
   // type, or one of:
@@ -311,7 +310,7 @@ class RE2 {
   //    (void*)NULL     (the corresponding matched sub-pattern is not copied)
   //
   // Returns true iff all of the following conditions are satisfied:
-  //   a. "text" matches "pattern" exactly
+  //   a. "text" matches "re" exactly
   //   b. The number of matched sub-patterns is >= number of supplied pointers
   //   c. The "i"th argument has a suitable type for holding the
   //      string captured as the "i"th sub-pattern.  If you pass in
@@ -327,32 +326,65 @@ class RE2 {
   //    RE2::FullMatch("abc", "[a-z]+(\\d+)?", &number);
   static bool FullMatchN(const StringPiece& text, const RE2& re,
                          const Arg* const args[], int argc);
-  static const VariadicFunction2<
-      bool, const StringPiece&, const RE2&, Arg, RE2::FullMatchN> FullMatch;
 
-  // Exactly like FullMatch(), except that "pattern" is allowed to match
+  // Exactly like FullMatch(), except that "re" is allowed to match
   // a substring of "text".
-  static bool PartialMatchN(const StringPiece& text, const RE2& re, // 3..16 args
+  static bool PartialMatchN(const StringPiece& text, const RE2& re,
                             const Arg* const args[], int argc);
-  static const VariadicFunction2<
-      bool, const StringPiece&, const RE2&, Arg, RE2::PartialMatchN> PartialMatch;
 
-  // Like FullMatch() and PartialMatch(), except that pattern has to
-  // match a prefix of "text", and "input" is advanced past the matched
+  // Like FullMatch() and PartialMatch(), except that "re" has to match
+  // a prefix of the text, and "input" is advanced past the matched
   // text.  Note: "input" is modified iff this routine returns true.
-  static bool ConsumeN(StringPiece* input, const RE2& pattern, // 3..16 args
+  static bool ConsumeN(StringPiece* input, const RE2& re,
                        const Arg* const args[], int argc);
-  static const VariadicFunction2<
-      bool, StringPiece*, const RE2&, Arg, RE2::ConsumeN> Consume;
 
-  // Like Consume(..), but does not anchor the match at the beginning of the
-  // string.  That is, "pattern" need not start its match at the beginning of
-  // "input".  For example, "FindAndConsume(s, "(\\w+)", &word)" finds the next
-  // word in "s" and stores it in "word".
-  static bool FindAndConsumeN(StringPiece* input, const RE2& pattern,
-                             const Arg* const args[], int argc);
-  static const VariadicFunction2<
-      bool, StringPiece*, const RE2&, Arg, RE2::FindAndConsumeN> FindAndConsume;
+  // Like Consume(), but does not anchor the match at the beginning of
+  // the text.  That is, "re" need not start its match at the beginning
+  // of "input".  For example, "FindAndConsume(s, "(\\w+)", &word)" finds
+  // the next word in "s" and stores it in "word".
+  static bool FindAndConsumeN(StringPiece* input, const RE2& re,
+                              const Arg* const args[], int argc);
+
+#ifndef SWIG
+ private:
+  template <typename F, typename SP>
+  static inline bool Apply(F f, SP sp, const RE2& re) {
+    return f(sp, re, NULL, 0);
+  }
+
+  template <typename F, typename SP, typename... A>
+  static inline bool Apply(F f, SP sp, const RE2& re, const A&... a) {
+    const Arg* const args[] = {&a...};
+    const int argc = sizeof...(a);
+    return f(sp, re, args, argc);
+  }
+
+ public:
+  // In order to allow FullMatch() et al. to be called with a varying number
+  // of arguments of varying types, we use two layers of variadic templates.
+  // The first layer constructs the temporary Arg objects. The second layer
+  // (above) constructs the array of pointers to the temporary Arg objects.
+
+  template <typename... A>
+  static bool FullMatch(const StringPiece& text, const RE2& re, A&&... a) {
+    return Apply(FullMatchN, text, re, Arg(std::forward<A>(a))...);
+  }
+
+  template <typename... A>
+  static bool PartialMatch(const StringPiece& text, const RE2& re, A&&... a) {
+    return Apply(PartialMatchN, text, re, Arg(std::forward<A>(a))...);
+  }
+
+  template <typename... A>
+  static bool Consume(StringPiece* input, const RE2& re, A&&... a) {
+    return Apply(ConsumeN, input, re, Arg(std::forward<A>(a))...);
+  }
+
+  template <typename... A>
+  static bool FindAndConsume(StringPiece* input, const RE2& re, A&&... a) {
+    return Apply(FindAndConsumeN, input, re, Arg(std::forward<A>(a))...);
+  }
+#endif
 
   // Replace the first match of "pattern" in "str" with "rewrite".
   // Within "rewrite", backslash-escaped digits (\1 to \9) can be
@@ -646,19 +678,7 @@ class RE2 {
     void set_one_line(bool b) { one_line_ = b; }
 
     void Copy(const Options& src) {
-      encoding_ = src.encoding_;
-      posix_syntax_ = src.posix_syntax_;
-      longest_match_ = src.longest_match_;
-      log_errors_ = src.log_errors_;
-      max_mem_ = src.max_mem_;
-      literal_ = src.literal_;
-      never_nl_ = src.never_nl_;
-      dot_nl_ = src.dot_nl_;
-      never_capture_ = src.never_capture_;
-      case_sensitive_ = src.case_sensitive_;
-      perl_classes_ = src.perl_classes_;
-      word_boundary_ = src.word_boundary_;
-      one_line_ = src.one_line_;
+      *this = src;
     }
 
     int ParseFlags() const;
@@ -677,10 +697,6 @@ class RE2 {
     bool perl_classes_;
     bool word_boundary_;
     bool one_line_;
-
-    //DISALLOW_COPY_AND_ASSIGN(Options);
-    Options(const Options&);
-    void operator=(const Options&);
   };
 
   // Returns the options set in the constructor.

@@ -178,9 +178,6 @@ class Compiler : public Regexp::Walker<Frag> {
   // Returns -1 if no more instructions are available.
   int AllocInst(int n);
 
-  // Deletes unused instructions.
-  void Trim();
-
   // Rune range compiler.
 
   // Begins a new alternation.
@@ -291,16 +288,6 @@ int Compiler::AllocInst(int n) {
   return id;
 }
 
-void Compiler::Trim() {
-  if (inst_len_ < inst_cap_) {
-    Prog::Inst* ip = new Prog::Inst[inst_len_];
-    memmove(ip, inst_, inst_len_ * sizeof ip[0]);
-    delete[] inst_;
-    inst_ = ip;
-    inst_cap_ = inst_len_;
-  }
-}
-
 // These routines are somewhat hard to visualize in text --
 // see http://swtch.com/~rsc/regexp/regexp1.html for
 // pictures explaining what is going on here.
@@ -409,16 +396,6 @@ Frag Compiler::ByteRange(int lo, int hi, bool foldcase) {
   if (id < 0)
     return NoMatch();
   inst_[id].InitByteRange(lo, hi, foldcase, 0);
-  prog_->byte_inst_count_++;
-  prog_->MarkByteRange(lo, hi);
-  if (foldcase && lo <= 'z' && hi >= 'a') {
-    if (lo < 'a')
-      lo = 'a';
-    if (hi > 'z')
-      hi = 'z';
-    if (lo <= hi)
-      prog_->MarkByteRange(lo + 'A' - 'a', hi + 'A' - 'a');
-  }
   return Frag(id, PatchList::Mk(id << 1));
 }
 
@@ -446,19 +423,6 @@ Frag Compiler::EmptyWidth(EmptyOp empty) {
   if (id < 0)
     return NoMatch();
   inst_[id].InitEmptyWidth(empty, 0);
-  if (empty & (kEmptyBeginLine|kEmptyEndLine))
-    prog_->MarkByteRange('\n', '\n');
-  if (empty & (kEmptyWordBoundary|kEmptyNonWordBoundary)) {
-    int j;
-    for (int i = 0; i < 256; i = j) {
-      for (j = i + 1; j < 256 &&
-                      Prog::IsWordChar(static_cast<uint8>(i)) ==
-                          Prog::IsWordChar(static_cast<uint8>(j));
-           j++)
-        ;
-      prog_->MarkByteRange(i, j-1);
-    }
-  }
   return Frag(id, PatchList::Mk(id << 1));
 }
 
@@ -541,6 +505,9 @@ bool Compiler::IsCachedRuneByteSuffix(int id) {
 }
 
 void Compiler::AddSuffix(int id) {
+  if (failed_)
+    return;
+
   if (rune_range_.begin == 0) {
     rune_range_.begin = id;
     return;
@@ -600,9 +567,6 @@ int Compiler::AddSuffixRecursive(int root, int id) {
     else
       inst_[f.begin].set_out(br);
   }
-
-  // We just saved one ByteRange instruction. :)
-  prog_->byte_inst_count_--;
 
   int out = inst_[id].out();
   if (!IsCachedRuneByteSuffix(id)) {
@@ -1224,16 +1188,14 @@ Prog* Compiler::Finish() {
     inst_len_ = 1;
   }
 
-  // Trim instruction to minimum array and transfer to Prog.
-  Trim();
+  // Hand off the array to Prog.
   prog_->inst_ = inst_;
   prog_->size_ = inst_len_;
   inst_ = NULL;
 
-  // Compute byte map.
-  prog_->ComputeByteMap();
-
   prog_->Optimize();
+  prog_->Flatten();
+  prog_->ComputeByteMap();
 
   // Record remaining memory for DFA.
   if (max_mem_ <= 0) {

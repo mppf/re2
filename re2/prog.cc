@@ -6,7 +6,6 @@
 // Tested by compile_test.cc
 
 #include "util/util.h"
-#include "util/sparse_set.h"
 #include "re2/prog.h"
 #include "re2/stringpiece.h"
 
@@ -99,28 +98,23 @@ Prog::Prog()
     start_(0),
     start_unanchored_(0),
     size_(0),
-    byte_inst_count_(0),
     bytemap_range_(0),
+    first_byte_(-1),
     flags_(0),
     onepass_statesize_(0),
     inst_(NULL),
     dfa_first_(NULL),
     dfa_longest_(NULL),
     dfa_mem_(0),
-    delete_dfa_(NULL),
-    unbytemap_(NULL),
     onepass_nodes_(NULL),
     onepass_start_(NULL) {
 }
 
 Prog::~Prog() {
-  if (delete_dfa_ != NULL) {
-    delete_dfa_(&dfa_first_);
-    delete_dfa_(&dfa_longest_);
-  }
+  DeleteDFA(&dfa_first_);
+  DeleteDFA(&dfa_longest_);
   delete[] onepass_nodes_;
   delete[] inst_;
-  delete[] unbytemap_;
 }
 
 typedef SparseSet Workq;
@@ -156,23 +150,12 @@ static string FlattenedProgToString(Prog* prog, int start) {
 }
 
 string Prog::Dump() {
-  string map;
-  if (false) {  // Debugging
-    int lo = 0;
-    StringAppendF(&map, "byte map:\n");
-    for (int i = 0; i < bytemap_range_; i++) {
-      StringAppendF(&map, "\t%d. [%02x-%02x]\n", i, lo, unbytemap_[i]);
-      lo = unbytemap_[i] + 1;
-    }
-    StringAppendF(&map, "\n");
-  }
-
   if (did_flatten_)
-    return map + FlattenedProgToString(this, start_);
+    return FlattenedProgToString(this, start_);
 
   Workq q(size_);
   AddToQueue(&q, start_);
-  return map + ProgToString(this, &q);
+  return ProgToString(this, &q);
 }
 
 string Prog::DumpUnanchored() {
@@ -182,6 +165,26 @@ string Prog::DumpUnanchored() {
   Workq q(size_);
   AddToQueue(&q, start_unanchored_);
   return ProgToString(this, &q);
+}
+
+string Prog::DumpByteMap() {
+  string map;
+  for (int c = 0; c < 256; c++) {
+    int b = bytemap_[c];
+    int lo = c;
+    while (c < 256-1 && bytemap_[c+1] == b)
+      c++;
+    int hi = c;
+    StringAppendF(&map, "[%02x-%02x] -> %d\n", lo, hi, b);
+  }
+  return map;
+}
+
+int Prog::first_byte() {
+  std::call_once(first_byte_once_, [this]() {
+    first_byte_ = ComputeFirstByte();
+  });
+  return first_byte_;
 }
 
 static bool IsMatch(Prog*, Prog::Inst*);
@@ -317,46 +320,106 @@ uint32 Prog::EmptyFlags<StringPiece>(const StringPiece& text, const char* p);
 template
 uint32 Prog::EmptyFlags<FilePiece>(const FilePiece& text, FilePiece::ptr_rd_type p);
 
-void Prog::MarkByteRange(int lo, int hi) {
-  DCHECK_GE(lo, 0);
-  DCHECK_GE(hi, 0);
-  DCHECK_LE(lo, 255);
-  DCHECK_LE(hi, 255);
-  DCHECK_LE(lo, hi);
-  if (0 < lo && lo <= 255)
-    byterange_.Set(lo - 1);
-  if (0 <= hi && hi <= 255)
-    byterange_.Set(hi);
-}
+class ByteMapBuilder {
+ public:
+  ByteMapBuilder() {
+    for (int i = 0; i < arraysize(words_); i++)
+      words_[i] = 0;
+  }
+
+  void Mark(int lo, int hi) {
+    DCHECK_GE(lo, 0);
+    DCHECK_GE(hi, 0);
+    DCHECK_LE(lo, 255);
+    DCHECK_LE(hi, 255);
+    DCHECK_LE(lo, hi);
+
+    lo--;
+
+    if (0 <= lo)
+      Set(lo);
+    Set(hi);
+  }
+
+  int Build(uint8* bytemap) {
+    uint8 b = 0;
+    uint64 word = 0;
+    for (int c = 0; c < 256; c++) {
+      if ((c & 63) == 0)
+        word = words_[c >> 6];
+      bytemap[c] = b;
+      b += word & 1;
+      word >>= 1;
+    }
+    return bytemap[255] + 1;
+  }
+
+ private:
+  bool Get(int c) const {
+    return words_[c >> 6] & (1ULL << (c & 63));
+  }
+
+  void Set(int c) {
+    words_[c >> 6] |= 1ULL << (c & 63);
+  }
+
+  uint64 words_[4];
+
+  DISALLOW_COPY_AND_ASSIGN(ByteMapBuilder);
+};
 
 void Prog::ComputeByteMap() {
-  // Fill in bytemap with byte classes for prog_.
-  // Ranges of bytes that are treated as indistinguishable
-  // by the regexp program are mapped to a single byte class.
-  // The vector prog_->byterange() marks the end of each
-  // such range.
-  const Bitmap<256>& v = byterange();
+  // Fill in byte map with byte classes for the program.
+  // Ranges of bytes that are treated indistinguishably
+  // are mapped to a single byte class.
+  ByteMapBuilder builder;
 
-  COMPILE_ASSERT(8*sizeof(v.Word(0)) == 32, wordsize);
-  uint8 n = 0;
-  uint32 bits = 0;
-  for (int i = 0; i < 256; i++) {
-    if ((i&31) == 0)
-      bits = v.Word(i >> 5);
-    bytemap_[i] = n;
-    n += bits & 1;
-    bits >>= 1;
+  // Don't repeat the work for ^ and $.
+  bool marked_line_boundaries = false;
+  // Don't repeat the work for \b and \B.
+  bool marked_word_boundaries = false;
+
+  for (int id = 0; id < static_cast<int>(size()); id++) {
+    Inst* ip = inst(id);
+    if (ip->opcode() == kInstByteRange) {
+      int lo = ip->lo();
+      int hi = ip->hi();
+      builder.Mark(lo, hi);
+      if (ip->foldcase() && lo <= 'z' && hi >= 'a') {
+        if (lo < 'a')
+          lo = 'a';
+        if (hi > 'z')
+          hi = 'z';
+        if (lo <= hi)
+          builder.Mark(lo + 'A' - 'a', hi + 'A' - 'a');
+      }
+    } else if (ip->opcode() == kInstEmptyWidth) {
+      if (ip->empty() & (kEmptyBeginLine|kEmptyEndLine) &&
+          !marked_line_boundaries) {
+        builder.Mark('\n', '\n');
+        marked_line_boundaries = true;
+      }
+      if (ip->empty() & (kEmptyWordBoundary|kEmptyNonWordBoundary) &&
+          !marked_word_boundaries) {
+        int j;
+        for (int i = 0; i < 256; i = j) {
+          for (j = i + 1; j < 256 &&
+                          Prog::IsWordChar(static_cast<uint8>(i)) ==
+                              Prog::IsWordChar(static_cast<uint8>(j));
+               j++)
+            ;
+          builder.Mark(i, j - 1);
+        }
+        marked_word_boundaries = true;
+      }
+    }
   }
-  bytemap_range_ = bytemap_[255] + 1;
-  unbytemap_ = new uint8[bytemap_range_];
-  for (int i = 0; i < 256; i++)
-    unbytemap_[bytemap_[i]] = static_cast<uint8>(i);
+
+  bytemap_range_ = builder.Build(bytemap_);
 
   if (0) {  // For debugging: use trivial byte map.
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < 256; i++)
       bytemap_[i] = static_cast<uint8>(i);
-      unbytemap_[i] = static_cast<uint8>(i);
-    }
     bytemap_range_ = 256;
     LOG(INFO) << "Using trivial bytemap.";
   }
@@ -367,10 +430,16 @@ void Prog::Flatten() {
     return;
   did_flatten_ = true;
 
+  // Scratch structures. It's important that these are reused by EmitList()
+  // because we call it in a loop and it would thrash the heap otherwise.
+  SparseSet q(size());
+  vector<int> stk;
+  stk.reserve(size());
+
   // First pass: Marks "roots".
   // Builds the mapping from inst-ids to root-ids.
   SparseArray<int> rootmap(size());
-  MarkRoots(&rootmap);
+  MarkRoots(&rootmap, &q, &stk);
 
   // Second pass: Emits "lists". Remaps outs to root-ids.
   // Builds the mapping from root-ids to flat-ids.
@@ -380,17 +449,28 @@ void Prog::Flatten() {
   for (SparseArray<int>::const_iterator i = rootmap.begin();
        i != rootmap.end();
        ++i) {
-    flatmap[i->value()] = flat.size();
-    EmitList(i->index(), &rootmap, &flat);
+    flatmap[i->value()] = static_cast<int>(flat.size());
+    EmitList(i->index(), &rootmap, &flat, &q, &stk);
     flat.back().set_last();
   }
 
+  list_count_ = static_cast<int>(flatmap.size());
+  for (int i = 0; i < kNumInst; i++)
+    inst_count_[i] = 0;
+
   // Third pass: Remaps outs to flat-ids.
+  // Counts instructions by opcode.
   for (int id = 0; id < static_cast<int>(flat.size()); id++) {
     Inst* ip = &flat[id];
     if (ip->opcode() != kInstAltMatch)  // handled in EmitList()
       ip->set_out(flatmap[ip->out()]);
+    inst_count_[ip->opcode()]++;
   }
+
+  int total = 0;
+  for (int i = 0; i < kNumInst; i++)
+    total += inst_count_[i];
+  DCHECK_EQ(total, static_cast<int>(flat.size()));
 
   // Remap start_unanchored and start.
   if (start_unanchored() == 0) {
@@ -404,13 +484,14 @@ void Prog::Flatten() {
   }
 
   // Finally, replace the old instructions with the new instructions.
-  size_ = flat.size();
+  size_ = static_cast<int>(flat.size());
   delete[] inst_;
   inst_ = new Inst[size_];
   memmove(inst_, flat.data(), size_ * sizeof *inst_);
 }
 
-void Prog::MarkRoots(SparseArray<int>* rootmap) {
+void Prog::MarkRoots(SparseArray<int>* rootmap,
+                     SparseSet* q, vector<int>* stk) {
   // Mark the kInstFail instruction.
   rootmap->set_new(0, rootmap->size());
 
@@ -420,16 +501,16 @@ void Prog::MarkRoots(SparseArray<int>* rootmap) {
   if (!rootmap->has_index(start()))
     rootmap->set_new(start(), rootmap->size());
 
-  Workq q(size());
-  stack<int> stk;
-  stk.push(start_unanchored());
-  while (!stk.empty()) {
-    int id = stk.top();
-    stk.pop();
+  q->clear();
+  stk->clear();
+  stk->push_back(start_unanchored());
+  while (!stk->empty()) {
+    int id = stk->back();
+    stk->pop_back();
   Loop:
-    if (q.contains(id))
+    if (q->contains(id))
       continue;
-    q.insert_new(id);
+    q->insert_new(id);
 
     Inst* ip = inst(id);
     switch (ip->opcode()) {
@@ -439,7 +520,7 @@ void Prog::MarkRoots(SparseArray<int>* rootmap) {
 
       case kInstAltMatch:
       case kInstAlt:
-        stk.push(ip->out1());
+        stk->push_back(ip->out1());
         id = ip->out();
         goto Loop;
 
@@ -463,17 +544,18 @@ void Prog::MarkRoots(SparseArray<int>* rootmap) {
   }
 }
 
-void Prog::EmitList(int root, SparseArray<int>* rootmap, vector<Inst>* flat) {
-  Workq q(size());
-  stack<int> stk;
-  stk.push(root);
-  while (!stk.empty()) {
-    int id = stk.top();
-    stk.pop();
+void Prog::EmitList(int root, SparseArray<int>* rootmap, vector<Inst>* flat,
+                    SparseSet* q, vector<int>* stk) {
+  q->clear();
+  stk->clear();
+  stk->push_back(root);
+  while (!stk->empty()) {
+    int id = stk->back();
+    stk->pop_back();
   Loop:
-    if (q.contains(id))
+    if (q->contains(id))
       continue;
-    q.insert_new(id);
+    q->insert_new(id);
 
     if (id != root && rootmap->has_index(id)) {
       // We reached another "tree" via epsilon transition. Emit a kInstNop
@@ -493,12 +575,12 @@ void Prog::EmitList(int root, SparseArray<int>* rootmap, vector<Inst>* flat) {
       case kInstAltMatch:
         flat->emplace_back();
         flat->back().set_opcode(kInstAltMatch);
-        flat->back().set_out(id+1);
-        flat->back().out1_ = id+2;
+        flat->back().set_out(static_cast<int>(flat->size()));
+        flat->back().out1_ = static_cast<uint32>(flat->size())+1;
         // Fall through.
 
       case kInstAlt:
-        stk.push(ip->out1());
+        stk->push_back(ip->out1());
         id = ip->out();
         goto Loop;
 
@@ -508,7 +590,6 @@ void Prog::EmitList(int root, SparseArray<int>* rootmap, vector<Inst>* flat) {
         flat->emplace_back();
         memmove(&flat->back(), ip, sizeof *ip);
         flat->back().set_out(rootmap->get_existing(ip->out()));
-        id = ip->out();
         break;
 
       case kInstNop:

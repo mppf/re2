@@ -58,16 +58,14 @@ cc_library(
         "re2/re2.h",
         "re2/set.h",
         "re2/stringpiece.h",
-        "re2/variadic_function.h",
     ],
     copts = ["-pthread"],
-    includes = ["."],
     linkopts = ["-pthread"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
-    name = "test",
+    name = "testing",
     testonly = 1,
     srcs = [
         "re2/testing/backtrack.cc",
@@ -79,7 +77,6 @@ cc_library(
         "re2/testing/tester.cc",
         "util/pcre.cc",
         "util/random.cc",
-        "util/test.cc",
         "util/thread.cc",
     ],
     hdrs = [
@@ -87,13 +84,19 @@ cc_library(
         "re2/testing/regexp_generator.h",
         "re2/testing/string_generator.h",
         "re2/testing/tester.h",
+        "util/benchmark.h",
         "util/pcre.h",
         "util/random.h",
         "util/test.h",
         "util/thread.h",
     ],
-    includes = ["."],
     deps = [":re2"],
+)
+
+cc_library(
+    name = "test",
+    srcs = ["util/test.cc"],
+    deps = [":testing"],
 )
 
 load("re2_test", "re2_test")
@@ -156,4 +159,18 @@ re2_test(
     size = "large",
 )
 
-# TODO: Add support for regexp_benchmark.
+cc_library(
+    name = "benchmark",
+    srcs = ["util/benchmark.cc"],
+    deps = [":testing"],
+)
+
+cc_binary(
+    name = "regexp_benchmark",
+    srcs = ["re2/testing/regexp_benchmark.cc"],
+    linkopts = [
+        "-lm",
+        "-lrt",
+    ],
+    deps = [":benchmark"],
+)
