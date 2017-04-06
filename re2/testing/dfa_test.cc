@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "util/test.h"
+#include "util/logging.h"
 #include "util/strutil.h"
 #include "re2/prog.h"
 #include "re2/re2.h"
@@ -16,8 +17,6 @@
 #include "re2/testing/string_generator.h"
 
 static const bool UsingMallocCounter = false;
-
-DECLARE_bool(re2_dfa_bail_when_slow);
 
 DEFINE_int32(size, 8, "log2(number of DFA nodes)");
 DEFINE_int32(repeat, 2, "Repetition count.");
@@ -76,15 +75,10 @@ TEST(Multithreaded, BuildEntireDFA) {
 // the DFA once the memory limits are reached.
 TEST(SingleThreaded, BuildEntireDFA) {
   // Create regexp with 2^30 states in DFA.
-  string s = "a";
-  for (int i = 0; i < 30; i++)
-    s += "[ab]";
-  s += "b";
-
-  Regexp* re = Regexp::Parse(s, Regexp::LikePerl, NULL);
+  Regexp* re = Regexp::Parse("a[ab]{30}b", Regexp::LikePerl, NULL);
   CHECK(re);
-  int max = 24;
-  for (int i = 17; i < max; i++) {
+
+  for (int i = 17; i < 24; i++) {
     int64_t limit = 1<<i;
     int64_t usage;
     //int64_t progusage, dfamem;
@@ -99,15 +93,15 @@ TEST(SingleThreaded, BuildEntireDFA) {
       usage = m.HeapGrowth();
       delete prog;
     }
-    if (!UsingMallocCounter)
-      continue;
-    //LOG(INFO) << "limit " << limit << ", "
-    //          << "prog usage " << progusage << ", "
-    //          << "DFA budget " << dfamem << ", "
-    //          << "total " << usage;
-    // Tolerate +/- 10%.
-    CHECK_GT(usage, limit*9/10);
-    CHECK_LT(usage, limit*11/10);
+    if (UsingMallocCounter) {
+      //LOG(INFO) << "limit " << limit << ", "
+      //          << "prog usage " << progusage << ", "
+      //          << "DFA budget " << dfamem << ", "
+      //          << "total " << usage;
+      // Tolerate +/- 10%.
+      CHECK_GT(usage, limit*9/10);
+      CHECK_LT(usage, limit*11/10);
+    }
   }
   re->Decref();
 }
@@ -165,6 +159,14 @@ static string DeBruijnString(int n) {
 // 2^n byte limit, it must be handling out-of-memory conditions
 // gracefully.
 TEST(SingleThreaded, SearchDFA) {
+  // The De Bruijn string is the worst case input for this regexp.
+  // By default, the DFA will notice that it is flushing its cache
+  // too frequently and will bail out early, so that RE2 can use the
+  // NFA implementation instead.  (The DFA loses its speed advantage
+  // if it can't get a good cache hit rate.)
+  // Tell the DFA to trudge along instead.
+  Prog::TEST_dfa_should_bail_when_slow(false);
+
   // Choice of n is mostly arbitrary, except that:
   //   * making n too big makes the test run for too long.
   //   * making n too small makes the DFA refuse to run,
@@ -181,14 +183,6 @@ TEST(SingleThreaded, SearchDFA) {
   string no_match = DeBruijnString(n);
   string match = no_match + "0";
 
-  // The De Bruijn string is the worst case input for this regexp.
-  // By default, the DFA will notice that it is flushing its cache
-  // too frequently and will bail out early, so that RE2 can use the
-  // NFA implementation instead.  (The DFA loses its speed advantage
-  // if it can't get a good cache hit rate.)
-  // Tell the DFA to trudge along instead.
-  FLAGS_re2_dfa_bail_when_slow = false;
-
   int64_t usage;
   int64_t peak_usage;
   {
@@ -196,7 +190,8 @@ TEST(SingleThreaded, SearchDFA) {
     Prog* prog = re->CompileToProg(1<<n);
     CHECK(prog);
     for (int i = 0; i < 10; i++) {
-      bool matched, failed = false;
+      bool matched = false;
+      bool failed = false;
       matched = prog->SearchDFA(match, NULL,
                                 Prog::kUnanchored, Prog::kFirstMatch,
                                 NULL, &failed, NULL);
@@ -212,13 +207,16 @@ TEST(SingleThreaded, SearchDFA) {
     peak_usage = m.PeakHeapGrowth();
     delete prog;
   }
-  if (!UsingMallocCounter)
-    return;
-  //LOG(INFO) << "usage " << usage << ", "
-  //          << "peak usage " << peak_usage;
-  CHECK_LT(usage, 1<<n);
-  CHECK_LT(peak_usage, 1<<n);
+  if (UsingMallocCounter) {
+    //LOG(INFO) << "usage " << usage << ", "
+    //          << "peak usage " << peak_usage;
+    CHECK_LT(usage, 1<<n);
+    CHECK_LT(peak_usage, 1<<n);
+  }
   re->Decref();
+
+  // Reset to original behaviour.
+  Prog::TEST_dfa_should_bail_when_slow(true);
 }
 
 // Helper function: searches for match, which should match,
@@ -242,6 +240,8 @@ static void DoSearch(Prog* prog, const StringPiece& match,
 }
 
 TEST(Multithreaded, SearchDFA) {
+  Prog::TEST_dfa_should_bail_when_slow(false);
+
   // Same as single-threaded test above.
   const int n = 18;
   Regexp* re = Regexp::Parse(StringPrintf("0[01]{%d}$", n),
@@ -249,7 +249,6 @@ TEST(Multithreaded, SearchDFA) {
   CHECK(re);
   string no_match = DeBruijnString(n);
   string match = no_match + "0";
-  FLAGS_re2_dfa_bail_when_slow = false;
 
   // Check that single-threaded code works.
   {
@@ -278,6 +277,9 @@ TEST(Multithreaded, SearchDFA) {
   }
 
   re->Decref();
+
+  // Reset to original behaviour.
+  Prog::TEST_dfa_should_bail_when_slow(true);
 }
 
 struct ReverseTest {

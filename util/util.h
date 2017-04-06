@@ -9,25 +9,6 @@
 #include <string>
 using std::string;
 
-#ifdef _WIN32
-
-#define snprintf _snprintf_s
-#define stricmp _stricmp
-#define strtof strtod /* not really correct but best we can do */
-#define strtoll _strtoi64
-#define strtoull _strtoui64
-#define vsnprintf vsnprintf_s
-
-#pragma warning(disable: 4200) // zero-sized array
-
-#endif
-
-// DISALLOW_COPY_AND_ASSIGN disallows the copy and operator= functions.
-// It goes in the private: declarations in a class.
-#define DISALLOW_COPY_AND_ASSIGN(TypeName) \
-  TypeName(const TypeName&);               \
-  void operator=(const TypeName&)
-
 #define arraysize(array) (int)(sizeof(array)/sizeof((array)[0]))
 
 #ifndef FALLTHROUGH_INTENDED
@@ -37,9 +18,5 @@ using std::string;
 #ifndef NO_THREAD_SAFETY_ANALYSIS
 #define NO_THREAD_SAFETY_ANALYSIS
 #endif
-
-#include "util/logging.h"
-#include "util/mutex.h"
-#include "util/utf.h"
 
 #endif  // UTIL_UTIL_H_

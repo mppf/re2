@@ -8,6 +8,7 @@
 #include <string>
 
 #include "util/test.h"
+#include "util/utf.h"
 #include "re2/testing/string_generator.h"
 #include "re2/testing/regexp_generator.h"
 
@@ -46,7 +47,7 @@ static void RunTest(int len, string alphabet, bool donull) {
   }
 
   while (g.HasNext()) {
-    string s = g.Next().as_string();
+    string s = g.Next().ToString();
     n++;
 
     // Check that all characters in s appear in alphabet.

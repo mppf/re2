@@ -8,9 +8,7 @@
 #include <string>
 
 #include "re2/re2.h"
-#include "util/logging.h"
 
-using re2::FLAGS_minloglevel;
 using re2::StringPiece;
 using std::string;
 
@@ -54,9 +52,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   if (size == 0 || size > 1000000)
     return 0;
 
-  // Suppress logging below FATAL severity.
-  FLAGS_minloglevel = 3;
-
   // The one-at-a-time hash by Bob Jenkins.
   uint32_t hash = 0;
   for (size_t i = 0; i < size; i++) {
@@ -95,8 +90,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
       break;
 
     int frac = len / i;
-    pattern.set(ptr, frac);
-    text.set(ptr + frac, len - frac);
+    pattern = StringPiece(ptr, frac);
+    text = StringPiece(ptr + frac, len - frac);
     Test(pattern, options, text);
   }
 

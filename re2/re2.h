@@ -309,7 +309,7 @@ class RE2 {
   // type, or one of:
   //    string          (matched piece is copied to string)
   //    StringPiece     (StringPiece is mutated to point to matched piece)
-  //    T               (where "bool T::ParseFrom(const char*, int)" exists)
+  //    T               (where "bool T::ParseFrom(const char*, size_t)" exists)
   //    (void*)NULL     (the corresponding matched sub-pattern is not copied)
   //
   // Returns true iff all of the following conditions are satisfied:
@@ -506,8 +506,8 @@ class RE2 {
   // whether submatch i matched the empty string or did not match:
   // either way, match[i].data() == NULL.
   bool Match(const StringPiece& text,
-             int startpos,
-             int endpos,
+             size_t startpos,
+             size_t endpos,
              Anchor anchor,
              StringPiece *match,
              int nmatch) const;
@@ -737,10 +737,10 @@ class RE2 {
   void Init(const StringPiece& pattern, const Options& options);
 
   bool DoMatch(const StringPiece& text,
-                   Anchor anchor,
-                   int* consumed,
-                   const Arg* const args[],
-                   int n) const;
+               Anchor anchor,
+               size_t* consumed,
+               const Arg* const args[],
+               int n) const;
 
   re2::Prog* ReverseProg() const;
 
@@ -775,9 +775,8 @@ class RE2 {
   mutable std::once_flag named_groups_once_;
   mutable std::once_flag group_names_once_;
 
-  //DISALLOW_COPY_AND_ASSIGN(RE2);
-  RE2(const RE2&);
-  void operator=(const RE2&);
+  RE2(const RE2&) = delete;
+  RE2& operator=(const RE2&) = delete;
 };
 
 /***** Implementation details *****/
@@ -788,7 +787,7 @@ class RE2 {
 template <class T>
 class _RE2_MatchObject {
  public:
-  static inline bool Parse(const char* str, int n, void* dest) {
+  static inline bool Parse(const char* str, size_t n, void* dest) {
     if (dest == NULL) return true;
     T* object = reinterpret_cast<T*>(dest);
     return object->ParseFrom(str, n);
@@ -803,7 +802,7 @@ class RE2::Arg {
   // Constructor specially designed for NULL arguments
   Arg(void*);
 
-  typedef bool (*Parser)(const char* str, int n, void* dest);
+  typedef bool (*Parser)(const char* str, size_t n, void* dest);
 
 // Type-specific parsers
 #define MAKE_PARSER(type, name)            \
@@ -836,31 +835,31 @@ class RE2::Arg {
       : arg_(p), parser_(parser) { }
 
   // Parse the data
-  bool Parse(const char* str, int n) const;
+  bool Parse(const char* str, size_t n) const;
 
  private:
   void*         arg_;
   Parser        parser_;
 
-  static bool parse_null          (const char* str, int n, void* dest);
-  static bool parse_char          (const char* str, int n, void* dest);
-  static bool parse_schar         (const char* str, int n, void* dest);
-  static bool parse_uchar         (const char* str, int n, void* dest);
-  static bool parse_float         (const char* str, int n, void* dest);
-  static bool parse_double        (const char* str, int n, void* dest);
-  static bool parse_string        (const char* str, int n, void* dest);
-  static bool parse_stringpiece   (const char* str, int n, void* dest);
+  static bool parse_null          (const char* str, size_t n, void* dest);
+  static bool parse_char          (const char* str, size_t n, void* dest);
+  static bool parse_schar         (const char* str, size_t n, void* dest);
+  static bool parse_uchar         (const char* str, size_t n, void* dest);
+  static bool parse_float         (const char* str, size_t n, void* dest);
+  static bool parse_double        (const char* str, size_t n, void* dest);
+  static bool parse_string        (const char* str, size_t n, void* dest);
+  static bool parse_stringpiece   (const char* str, size_t n, void* dest);
 
-#define DECLARE_INTEGER_PARSER(name)                                    \
- private:                                                               \
-  static bool parse_##name(const char* str, int n, void* dest);         \
-  static bool parse_##name##_radix(const char* str, int n, void* dest,  \
-                                   int radix);                          \
-                                                                        \
- public:                                                                \
-  static bool parse_##name##_hex(const char* str, int n, void* dest);   \
-  static bool parse_##name##_octal(const char* str, int n, void* dest); \
-  static bool parse_##name##_cradix(const char* str, int n, void* dest)
+#define DECLARE_INTEGER_PARSER(name)                                       \
+ private:                                                                  \
+  static bool parse_##name(const char* str, size_t n, void* dest);         \
+  static bool parse_##name##_radix(const char* str, size_t n, void* dest,  \
+                                   int radix);                             \
+                                                                           \
+ public:                                                                   \
+  static bool parse_##name##_hex(const char* str, size_t n, void* dest);   \
+  static bool parse_##name##_octal(const char* str, size_t n, void* dest); \
+  static bool parse_##name##_cradix(const char* str, size_t n, void* dest)
 
   DECLARE_INTEGER_PARSER(short);
   DECLARE_INTEGER_PARSER(ushort);
@@ -878,7 +877,7 @@ class RE2::Arg {
 inline RE2::Arg::Arg() : arg_(NULL), parser_(parse_null) { }
 inline RE2::Arg::Arg(void* p) : arg_(p), parser_(parse_null) { }
 
-inline bool RE2::Arg::Parse(const char* str, int n) const {
+inline bool RE2::Arg::Parse(const char* str, size_t n) const {
   return (*parser_)(str, n, arg_);
 }
 
@@ -932,7 +931,7 @@ class LazyRE2 {
 
   // Named accessor/initializer:
   RE2* get() const {
-    std::call_once(once_, [this]() { LazyRE2::Init(this); });
+    std::call_once(once_, &LazyRE2::Init, this);
     return ptr_;
   }
 

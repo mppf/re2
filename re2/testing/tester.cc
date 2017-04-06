@@ -12,6 +12,7 @@
 
 #include "util/util.h"
 #include "util/flags.h"
+#include "util/logging.h"
 #include "util/strutil.h"
 #include "re2/testing/tester.h"
 #include "re2/prog.h"
@@ -47,7 +48,7 @@ const char* engine_names[kEngineMax] = {
 };
 
 // Returns the name of the engine.
-static StringPiece EngineName(Engine e) {
+static const char* EngineName(Engine e) {
   CHECK_GE(e, 0);
   CHECK_LT(e, arraysize(engine_names));
   CHECK(engine_names[e] != NULL);
@@ -66,7 +67,7 @@ static uint32_t Engines() {
     cached_engines = ~0;
   } else {
     for (Engine i = static_cast<Engine>(0); i < kEngineMax; i++)
-      if (StringPiece(FLAGS_regexp_engines).contains(EngineName(i)))
+      if (FLAGS_regexp_engines.find(EngineName(i)) != string::npos)
         cached_engines |= 1<<i;
   }
 
@@ -100,14 +101,13 @@ typedef TestInstance::Result Result;
 static string FormatCapture(const StringPiece& text, const StringPiece& s) {
   if (s.begin() == NULL)
     return "(?,?)";
-  return StringPrintf("(%d,%d)",
-                      static_cast<int>(s.begin() - text.begin()),
-                      static_cast<int>(s.end() - text.begin()));
+  return StringPrintf("(%td,%td)",
+                      s.begin() - text.begin(), s.end() - text.begin());
 }
 
 // Returns whether text contains non-ASCII (>= 0x80) bytes.
 static bool NonASCII(const StringPiece& text) {
-  for (int i = 0; i < text.size(); i++)
+  for (size_t i = 0; i < text.size(); i++)
     if ((uint8_t)text[i] >= 0x80)
       return true;
   return false;
@@ -221,7 +221,7 @@ TestInstance::TestInstance(const StringPiece& regexp_str, Prog::MatchKind kind,
   }
 
   // Create re string that will be used for RE and RE2.
-  string re = regexp_str.as_string();
+  string re = regexp_str.ToString();
   // Accomodate flags.
   // Regexp::Latin1 will be accomodated below.
   if (!(flags & Regexp::OneLine))
@@ -402,8 +402,8 @@ void TestInstance::RunSearch(Engine type,
 
       result->matched = re2_->Match(
           context,
-          static_cast<int>(text.begin() - context.begin()),
-          static_cast<int>(text.end() - context.begin()),
+          static_cast<size_t>(text.begin() - context.begin()),
+          static_cast<size_t>(text.end() - context.begin()),
           re_anchor,
           result->submatch,
           nsubmatch);
@@ -422,16 +422,19 @@ void TestInstance::RunSearch(Engine type,
       // whitespace, not just vertical tab. Regexp::MimicsPCRE() is
       // unable to handle all cases of this, unfortunately, so just
       // catch them here. :(
-      if (regexp_str_.contains("\\v") &&
-          (text.contains("\n") || text.contains("\f") || text.contains("\r"))) {
+      if (regexp_str_.find("\\v") != StringPiece::npos &&
+          (text.find('\n') != StringPiece::npos ||
+           text.find('\f') != StringPiece::npos ||
+           text.find('\r') != StringPiece::npos)) {
         result->skipped = true;
         break;
       }
 
       // PCRE 8.34 or so started allowing vertical tab to match \s,
       // following a change made in Perl 5.18. RE2 does not.
-      if ((regexp_str_.contains("\\s") || regexp_str_.contains("\\S")) &&
-          text.contains("\v")) {
+      if ((regexp_str_.find("\\s") != StringPiece::npos ||
+           regexp_str_.find("\\S") != StringPiece::npos) &&
+          text.find('\v') != StringPiece::npos) {
         result->skipped = true;
         break;
       }
@@ -442,7 +445,7 @@ void TestInstance::RunSearch(Engine type,
         a[i] = PCRE::Arg(&result->submatch[i]);
         argptr[i] = &a[i];
       }
-      int consumed;
+      size_t consumed;
       PCRE::Anchor pcre_anchor;
       if (anchor == Prog::kAnchored)
         pcre_anchor = PCRE::ANCHOR_START;

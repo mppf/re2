@@ -33,11 +33,14 @@
 
 #include "re2/prog.h"
 #include "re2/regexp.h"
+#include "util/logging.h"
 #include "util/sparse_array.h"
 #include "util/sparse_set.h"
 #include "util/strutil.h"
 
 namespace re2 {
+
+static const bool ExtraDebug = false;
 
 template<typename StrPiece>
 class NFA {
@@ -62,8 +65,6 @@ class NFA {
   bool Search(const StrPiece& text, const StrPiece& context,
               bool anchored, bool longest,
               StrPiece* submatch, int nsubmatch);
-
-  static const int Debug = 0;
 
  private:
   struct Thread {
@@ -134,7 +135,8 @@ class NFA {
 
   Thread* free_threads_;  // free list
 
-  DISALLOW_COPY_AND_ASSIGN(NFA);
+  NFA(const NFA&) = delete;
+  NFA& operator=(const NFA&) = delete;
 };
 
 NFA::NFA(Prog* prog) {
@@ -241,7 +243,7 @@ void NFA::AddToThreadq(Threadq* q, int id0, int c, int flag,
     if (id == 0)
       continue;
     if (q->has_index(id)) {
-      if (Debug)
+      if (ExtraDebug)
         fprintf(stderr, "  [%d%s]\n", id, FormatCapture(t0->capture).c_str());
       continue;
     }
@@ -307,7 +309,7 @@ void NFA::AddToThreadq(Threadq* q, int id0, int c, int flag,
       // Save state; will pick up at next byte.
       t = Incref(t0);
       *tp = t;
-      if (Debug)
+      if (ExtraDebug)
         fprintf(stderr, " + %d%s\n", id, FormatCapture(t0->capture).c_str());
 
     Next:
@@ -438,12 +440,6 @@ string NFA::FormatCapture(ptr_type* capture) {
   return s;
 }
 
-// Returns whether haystack contains needle's memory.
-static bool StringPieceContains(const StrPiece haystack, const StrPiece needle) {
-  return haystack.begin() <= needle.begin() &&
-         needle.end() <= haystack.end();
-}
-
 bool NFA::Search(const StrPiece& text, const StrPiece& const_context,
             bool anchored, bool longest,
             StrPiece* submatch, int nsubmatch) {
@@ -454,13 +450,9 @@ bool NFA::Search(const StrPiece& text, const StrPiece& const_context,
   if (context.begin() == NULL)
     context = text;
 
-  if (!StringPieceContains(context, text)) {
-    LOG(FATAL) << "Bad args: context does not contain text ";
-    /* Not sure how to get these?
-                << reinterpret_cast<const void*>(context.begin())
-                << "+" << context.size() << " "
-                << reinterpret_cast<const void*>(text.begin())
-                << "+" << text.size();*/
+  // Sanity check: make sure that text lies within context.
+  if (text.begin() < context.begin() || text.end() > context.end()) {
+    LOG(DFATAL) << "context does not contain text";
     return false;
   }
 
@@ -497,11 +489,10 @@ bool NFA::Search(const StrPiece& text, const StrPiece& const_context,
   // For debugging prints.
   btext_ = context.begin();
 
-  if (Debug) {
+  if (ExtraDebug)
     fprintf(stderr, "NFA::Search %s (context: %s) anchored=%d longest=%d\n",
-            text.as_string().c_str(), context.as_string().c_str(), anchored,
+            text.ToString().c_str(), context.ToString().c_str(), anchored,
             longest);
-  }
 
   // Set up search.
   Threadq* runq = &q0_;
@@ -543,7 +534,7 @@ bool NFA::Search(const StrPiece& text, const StrPiece& const_context,
     else
       flag |= kEmptyNonWordBoundary;
 
-    if (Debug) {
+    if (ExtraDebug) {
       int c = 0;
       if (p == context.begin())
         c = '^';
@@ -636,7 +627,7 @@ bool NFA::Search(const StrPiece& text, const StrPiece& const_context,
 
     // If all the threads have died, stop early.
     if (runq->size() == 0) {
-      if (Debug)
+      if (ExtraDebug)
         fprintf(stderr, "dead\n");
       break;
     }
@@ -699,14 +690,12 @@ bool NFA::Search(const StrPiece& text, const StrPiece& const_context,
 
   if (matched_) {
     for (int i = 0; i < nsubmatch; i++)
-      submatch[i].set_ptr_end(match_[2*i], match_[2*i+1]);
-    if (Debug)
-      fprintf(stderr, "match (%d,%d)\n",
-              static_cast<int>(match_[0] - btext_),
-              static_cast<int>(match_[1] - btext_));
+      submatch[i].set_ptr_end(match_[2 * i], match_[2 * i + 1]);
+    if (ExtraDebug)
+      fprintf(stderr, "match (%td,%td)\n",
+              match_[0] - btext_, match_[1] - btext_);
     return true;
   }
-  VLOG(1) << "No matches found";
   return false;
 }
 
@@ -772,10 +761,11 @@ int Prog::ComputeFirstByte() {
 }
 
 template<typename StrPiece>
-bool Prog::SearchNFA(const StrPiece& text, const StrPiece& context,
-                     Anchor anchor, MatchKind kind,
-                     StrPiece* match, int nmatch) {
-  if (NFA<StrPiece>::Debug)
+bool
+Prog::SearchNFA(const StrPiece& text, const StrPiece& context,
+                Anchor anchor, MatchKind kind,
+                StrPiece* match, int nmatch) {
+  if (ExtraDebug)
     Dump();
 
   NFA<StrPiece> nfa(this);

@@ -9,14 +9,16 @@
 #include <vector>
 
 #include "util/test.h"
+#include "util/logging.h"
 #include "re2/filtered_re2.h"
 #include "re2/re2.h"
-
-DECLARE_int32(filtered_re2_min_atom_len); // From prefilter_tree.cc
 
 namespace re2 {
 
 struct FilterTestVars {
+  FilterTestVars() {}
+  explicit FilterTestVars(int min_atom_len) : f(min_atom_len) {}
+
   std::vector<string> atoms;
   std::vector<int> atom_indices;
   std::vector<int> matches;
@@ -26,14 +28,20 @@ struct FilterTestVars {
 
 TEST(FilteredRE2Test, EmptyTest) {
   FilterTestVars v;
+
+  v.f.Compile(&v.atoms);
+  EXPECT_EQ(0, v.atoms.size());
+
+  // Compile has no effect at all when called before Add: it will not
+  // record that it has been called and it will not clear the vector.
+  // The second point does not matter here, but the first point means
+  // that an error will be logged during the call to AllMatches.
   v.f.AllMatches("foo", v.atom_indices, &v.matches);
   EXPECT_EQ(0, v.matches.size());
 }
 
 TEST(FilteredRE2Test, SmallOrTest) {
-  FLAGS_filtered_re2_min_atom_len = 4;
-
-  FilterTestVars v;
+  FilterTestVars v(4);  // override the minimum atom length
   int id;
   v.f.Add("(foo|bar)", v.opts, &id);
 
@@ -46,7 +54,6 @@ TEST(FilteredRE2Test, SmallOrTest) {
 }
 
 TEST(FilteredRE2Test, SmallLatinTest) {
-  FLAGS_filtered_re2_min_atom_len = 3;
   FilterTestVars v;
   int id;
 
@@ -162,21 +169,19 @@ bool CheckExpectedAtoms(const char* atoms[],
       pass = pass && expected[i] == v->atoms[i];
 
   if (!pass) {
-    LOG(WARNING) << "Failed " << testname;
-    LOG(WARNING) << "Expected #atoms = " << expected.size();
+    LOG(ERROR) << "Failed " << testname;
+    LOG(ERROR) << "Expected #atoms = " << expected.size();
     for (size_t i = 0; i < expected.size(); i++)
-      LOG(WARNING) << expected[i];
-    LOG(WARNING) << "Found #atoms = " << v->atoms.size();
+      LOG(ERROR) << expected[i];
+    LOG(ERROR) << "Found #atoms = " << v->atoms.size();
     for (size_t i = 0; i < v->atoms.size(); i++)
-      LOG(WARNING) << v->atoms[i];
+      LOG(ERROR) << v->atoms[i];
   }
 
   return pass;
 }
 
 TEST(FilteredRE2Test, AtomTests) {
-  FLAGS_filtered_re2_min_atom_len = 3;
-
   int nfail = 0;
   for (int i = 0; i < arraysize(atom_tests); i++) {
     FilterTestVars v;
@@ -210,8 +215,6 @@ void FindAtomIndices(const std::vector<string>& atoms,
 }
 
 TEST(FilteredRE2Test, MatchEmptyPattern) {
-  FLAGS_filtered_re2_min_atom_len = 3;
-
   FilterTestVars v;
   AtomTest* t = &atom_tests[0];
   // We are using the regexps used in one of the atom tests
@@ -230,8 +233,6 @@ TEST(FilteredRE2Test, MatchEmptyPattern) {
 }
 
 TEST(FilteredRE2Test, MatchTests) {
-  FLAGS_filtered_re2_min_atom_len = 3;
-
   FilterTestVars v;
   AtomTest* t = &atom_tests[2];
   // We are using the regexps used in one of the atom tests

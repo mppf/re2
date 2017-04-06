@@ -10,14 +10,16 @@
 #include <vector>
 
 #include "util/util.h"
+#include "util/logging.h"
 #include "util/strutil.h"
+#include "util/utf.h"
 #include "re2/re2.h"
 #include "re2/unicode_casefold.h"
 #include "re2/walker-inl.h"
 
 namespace re2 {
 
-static const int Trace = false;
+static const bool ExtraDebug = false;
 
 typedef std::set<string>::iterator SSIter;
 typedef std::set<string>::const_iterator ConstSSIter;
@@ -28,13 +30,10 @@ Prefilter::Prefilter(Op op) {
   subs_ = NULL;
   if (op_ == AND || op_ == OR)
     subs_ = new std::vector<Prefilter*>;
-
-  VLOG(10) << "constructed: " << reinterpret_cast<intptr_t>(this);
 }
 
 // Destroys a Prefilter.
 Prefilter::~Prefilter() {
-  VLOG(10) << "destructing: " << reinterpret_cast<intptr_t>(this);
   if (subs_) {
     for (size_t i = 0; i < subs_->size(); i++)
       delete (*subs_)[i];
@@ -454,10 +453,10 @@ Prefilter::Info* Prefilter::Info::EmptyString() {
 typedef CharClass::iterator CCIter;
 Prefilter::Info* Prefilter::Info::CClass(CharClass *cc,
                                          bool latin1) {
-  if (Trace) {
-    VLOG(0) << "CharClassInfo:";
+  if (ExtraDebug) {
+    LOG(ERROR) << "CharClassInfo:";
     for (CCIter i = cc->begin(); i != cc->end(); ++i)
-      VLOG(0) << "  " << i->lo << "-" << i->hi;
+      LOG(ERROR) << "  " << i->lo << "-" << i->hi;
   }
 
   // If the class is too large, it's okay to overestimate.
@@ -477,9 +476,8 @@ Prefilter::Info* Prefilter::Info::CClass(CharClass *cc,
 
   a->is_exact_ = true;
 
-  if (Trace) {
-    VLOG(0) << " = " << a->ToString();
-  }
+  if (ExtraDebug)
+    LOG(ERROR) << " = " << a->ToString();
 
   return a;
 }
@@ -500,13 +498,14 @@ class Prefilter::Info::Walker : public Regexp::Walker<Prefilter::Info*> {
   bool latin1() { return latin1_; }
  private:
   bool latin1_;
-  DISALLOW_COPY_AND_ASSIGN(Walker);
+
+  Walker(const Walker&) = delete;
+  Walker& operator=(const Walker&) = delete;
 };
 
 Prefilter::Info* Prefilter::BuildInfo(Regexp* re) {
-  if (Trace) {
-    LOG(INFO) << "BuildPrefilter::Info: " << re->ToString();
-  }
+  if (ExtraDebug)
+    LOG(ERROR) << "BuildPrefilter::Info: " << re->ToString();
 
   bool latin1 = (re->parse_flags() & Regexp::Latin1) != 0;
   Prefilter::Info::Walker w(latin1);
@@ -608,7 +607,6 @@ Prefilter::Info* Prefilter::Info::Walker::PostVisit(
       info = child_args[0];
       for (int i = 1; i < nchild_args; i++)
         info = Alt(info, child_args[i]);
-      VLOG(10) << "Alt: " << info->ToString();
       break;
 
     case kRegexpStar:
@@ -638,10 +636,9 @@ Prefilter::Info* Prefilter::Info::Walker::PostVisit(
       break;
   }
 
-  if (Trace) {
-    VLOG(0) << "BuildInfo " << re->ToString()
-            << ": " << (info ? info->ToString() : "");
-  }
+  if (ExtraDebug)
+    LOG(ERROR) << "BuildInfo " << re->ToString()
+               << ": " << (info ? info->ToString() : "");
 
   return info;
 }

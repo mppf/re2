@@ -8,6 +8,7 @@
 #include <string>
 
 #include "util/util.h"
+#include "util/logging.h"
 #include "re2/prefilter.h"
 #include "re2/prefilter_tree.h"
 
@@ -16,6 +17,11 @@ namespace re2 {
 FilteredRE2::FilteredRE2()
     : compiled_(false),
       prefilter_tree_(new PrefilterTree()) {
+}
+
+FilteredRE2::FilteredRE2(int min_atom_len)
+    : compiled_(false),
+      prefilter_tree_(new PrefilterTree(min_atom_len)) {
 }
 
 FilteredRE2::~FilteredRE2() {
@@ -44,8 +50,13 @@ RE2::ErrorCode FilteredRE2::Add(const StringPiece& pattern,
 }
 
 void FilteredRE2::Compile(std::vector<string>* atoms) {
-  if (compiled_ || re2_vec_.size() == 0) {
-    LOG(INFO) << "C: " << compiled_ << " S:" << re2_vec_.size();
+  if (compiled_) {
+    LOG(ERROR) << "Compile called already.";
+    return;
+  }
+
+  if (re2_vec_.empty()) {
+    LOG(ERROR) << "Compile called before Add.";
     return;
   }
 
@@ -68,7 +79,7 @@ int FilteredRE2::SlowFirstMatch(const StringPiece& text) const {
 int FilteredRE2::FirstMatch(const StringPiece& text,
                             const std::vector<int>& atoms) const {
   if (!compiled_) {
-    LOG(DFATAL) << "FirstMatch called before Compile";
+    LOG(DFATAL) << "FirstMatch called before Compile.";
     return -1;
   }
   std::vector<int> regexps;

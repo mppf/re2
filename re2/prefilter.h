@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "util/util.h"
+#include "util/logging.h"
 
 namespace re2 {
 
@@ -42,7 +43,7 @@ class Prefilter {
 
   // The children of the Prefilter node.
   std::vector<Prefilter*>* subs() {
-    CHECK(op_ == AND || op_ == OR);
+    DCHECK(op_ == AND || op_ == OR);
     return subs_;
   }
 
@@ -98,7 +99,8 @@ class Prefilter {
   // and -1 for duplicate nodes.
   int unique_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(Prefilter);
+  Prefilter(const Prefilter&) = delete;
+  Prefilter& operator=(const Prefilter&) = delete;
 };
 
 }  // namespace re2

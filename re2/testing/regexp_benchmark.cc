@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "util/test.h"
+#include "util/logging.h"
 #include "util/strutil.h"
 #include "re2/prog.h"
 #include "re2/re2.h"
@@ -98,11 +99,8 @@ void MemoryUsage() {
     fprintf(stderr, "RE2:    %7lld bytes (peak=%lld)\n", mc.HeapGrowth(), mc.PeakHeapGrowth());
   }
 
-  fprintf(stderr, "sizeof: PCRE=%d RE2=%d Prog=%d Inst=%d\n",
-          static_cast<int>(sizeof(PCRE)),
-          static_cast<int>(sizeof(RE2)),
-          static_cast<int>(sizeof(Prog)),
-          static_cast<int>(sizeof(Prog::Inst)));
+  fprintf(stderr, "sizeof: PCRE=%zd RE2=%zd Prog=%zd Inst=%zd\n",
+          sizeof(PCRE), sizeof(RE2), sizeof(Prog), sizeof(Prog::Inst));
 }
 
 // Regular expression implementation wrappers.

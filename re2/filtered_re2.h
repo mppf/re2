@@ -33,6 +33,7 @@ class PrefilterTree;
 class FilteredRE2 {
  public:
   FilteredRE2();
+  explicit FilteredRE2(int min_atom_len);
   ~FilteredRE2();
 
   // Uses RE2 constructor to create a RE2 object (re). Returns
@@ -100,9 +101,8 @@ class FilteredRE2 {
   // An AND-OR tree of string atoms used for filtering regexps.
   PrefilterTree* prefilter_tree_;
 
-  //DISALLOW_COPY_AND_ASSIGN(FilteredRE2);
-  FilteredRE2(const FilteredRE2&);
-  void operator=(const FilteredRE2&);
+  FilteredRE2(const FilteredRE2&) = delete;
+  FilteredRE2& operator=(const FilteredRE2&) = delete;
 };
 
 }  // namespace re2

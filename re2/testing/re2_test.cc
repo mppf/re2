@@ -5,21 +5,20 @@
 
 // TODO: Test extractions for PartialMatch/Consume
 
-#include <assert.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 #include <map>
 #include <string>
 #include <utility>
-#if !defined(_MSC_VER) && !defined(__MINGW32__)
+#if !defined(_MSC_VER) && !defined(__CYGWIN__) && !defined(__MINGW32__)
 #include <sys/mman.h>
 #include <unistd.h>  /* for sysconf */
 #endif
 
 #include "util/test.h"
+#include "util/logging.h"
 #include "util/strutil.h"
 #include "re2/re2.h"
 #include "re2/regexp.h"
@@ -823,42 +822,42 @@ TEST(RE2, FullMatchTypeTests) {
     int64_t v;
     static const int64_t max = INT64_C(0x7fffffffffffffff);
     static const int64_t min = -max - 1;
-    char buf[32];
+    string str;
 
     CHECK(RE2::FullMatch("100",  "(-?\\d+)", &v)); CHECK_EQ(v, 100);
     CHECK(RE2::FullMatch("-100", "(-?\\d+)", &v)); CHECK_EQ(v, -100);
 
-    snprintf(buf, sizeof(buf), "%lld", (long long)max);
-    CHECK(RE2::FullMatch(buf,    "(-?\\d+)", &v)); CHECK_EQ(v, max);
+    str = std::to_string(max);
+    CHECK(RE2::FullMatch(str,    "(-?\\d+)", &v)); CHECK_EQ(v, max);
 
-    snprintf(buf, sizeof(buf), "%lld", (long long)min);
-    CHECK(RE2::FullMatch(buf,    "(-?\\d+)", &v)); CHECK_EQ(v, min);
+    str = std::to_string(min);
+    CHECK(RE2::FullMatch(str,    "(-?\\d+)", &v)); CHECK_EQ(v, min);
 
-    snprintf(buf, sizeof(buf), "%lld", (long long)max);
-    assert(buf[strlen(buf)-1] != '9');
-    buf[strlen(buf)-1]++;
-    CHECK(!RE2::FullMatch(buf,   "(-?\\d+)", &v));
+    str = std::to_string(max);
+    CHECK_NE(str.back(), '9');
+    str.back()++;
+    CHECK(!RE2::FullMatch(str,   "(-?\\d+)", &v));
 
-    snprintf(buf, sizeof(buf), "%lld", (long long)min);
-    assert(buf[strlen(buf)-1] != '9');
-    buf[strlen(buf)-1]++;
-    CHECK(!RE2::FullMatch(buf,   "(-?\\d+)", &v));
+    str = std::to_string(min);
+    CHECK_NE(str.back(), '9');
+    str.back()++;
+    CHECK(!RE2::FullMatch(str,   "(-?\\d+)", &v));
   }
   {
     uint64_t v;
     int64_t v2;
     static const uint64_t max = UINT64_C(0xffffffffffffffff);
-    char buf[32];
+    string str;
 
     CHECK(RE2::FullMatch("100",  "(-?\\d+)", &v));  CHECK_EQ(v, 100);
     CHECK(RE2::FullMatch("-100", "(-?\\d+)", &v2)); CHECK_EQ(v2, -100);
 
-    snprintf(buf, sizeof(buf), "%llu", (unsigned long long)max);
-    CHECK(RE2::FullMatch(buf,    "(-?\\d+)", &v)); CHECK_EQ(v, max);
+    str = std::to_string(max);
+    CHECK(RE2::FullMatch(str,    "(-?\\d+)", &v)); CHECK_EQ(v, max);
 
-    assert(buf[strlen(buf)-1] != '9');
-    buf[strlen(buf)-1]++;
-    CHECK(!RE2::FullMatch(buf,   "(-?\\d+)", &v));
+    CHECK_NE(str.back(), '9');
+    str.back()++;
+    CHECK(!RE2::FullMatch(str,   "(-?\\d+)", &v));
   }
 }
 
@@ -888,8 +887,8 @@ TEST(RE2, FloatingPointFullMatchTypes) {
     // short.
     //
     // This is known to fail on Cygwin and MinGW due to a broken
-    // implementation of strtof(3). Sigh.
-#if !defined(__CYGWIN__) && !defined(__MINGW32__)
+    // implementation of strtof(3). And apparently MSVC too. Sigh.
+#if !defined(_MSC_VER) && !defined(__CYGWIN__) && !defined(__MINGW32__)
     CHECK(RE2::FullMatch("0.1", "(.*)", &v));
     CHECK_EQ(v, 0.1f) << StringPrintf("%.8g != %.8g", v, 0.1f);
     CHECK(RE2::FullMatch("6700000000081920.1", "(.*)", &v));
@@ -1607,10 +1606,10 @@ TEST(RE2, Bug26356109) {
   string s = "abc";
   StringPiece m;
 
-  CHECK(re.Match(s, 0, static_cast<int>(s.size()), RE2::UNANCHORED, &m, 1));
+  CHECK(re.Match(s, 0, s.size(), RE2::UNANCHORED, &m, 1));
   CHECK_EQ(m, s) << " (UNANCHORED) got m='" << m << "', want '" << s << "'";
 
-  CHECK(re.Match(s, 0, static_cast<int>(s.size()), RE2::ANCHOR_BOTH, &m, 1));
+  CHECK(re.Match(s, 0, s.size(), RE2::ANCHOR_BOTH, &m, 1));
   CHECK_EQ(m, s) << " (ANCHOR_BOTH) got m='" << m << "', want '" << s << "'";
 }
 

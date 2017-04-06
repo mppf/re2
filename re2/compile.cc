@@ -14,6 +14,8 @@
 #include <map>
 #include <utility>
 
+#include "util/logging.h"
+#include "util/utf.h"
 #include "re2/prog.h"
 #include "re2/re2.h"
 #include "re2/regexp.h"
@@ -249,7 +251,8 @@ class Compiler : public Regexp::Walker<Frag> {
 
   RE2::Anchor anchor_;  // anchor mode for RE2::Set
 
-  DISALLOW_COPY_AND_ASSIGN(Compiler);
+  Compiler(const Compiler&) = delete;
+  Compiler& operator=(const Compiler&) = delete;
 };
 
 Compiler::Compiler() {
@@ -1103,7 +1106,7 @@ void Compiler::Setup(Regexp::ParseFlags flags, int64_t max_mem,
   max_mem_ = max_mem;
   if (max_mem <= 0) {
     max_inst_ = 100000;  // more than enough
-  } else if (max_mem <= static_cast<int64_t>(sizeof(Prog))) {
+  } else if (static_cast<size_t>(max_mem) <= sizeof(Prog)) {
     // No room for anything.
     max_inst_ = 0;
   } else {
@@ -1263,11 +1266,11 @@ Prog* Compiler::CompileSet(const RE2::Options& options, RE2::Anchor anchor,
 
   // Make sure DFA has enough memory to operate,
   // since we're not going to fall back to the NFA.
-  bool failed;
+  bool dfa_failed = false;
   StringPiece sp = "hello, world";
   prog->SearchDFA(sp, sp, Prog::kAnchored, Prog::kManyMatch,
-                  NULL, &failed, NULL);
-  if (failed) {
+                  NULL, &dfa_failed, NULL);
+  if (dfa_failed) {
     delete prog;
     return NULL;
   }

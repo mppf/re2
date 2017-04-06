@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "util/util.h"
+#include "util/logging.h"
 #include "util/strutil.h"
 #include "re2/bitmap256.h"
 #include "re2/stringpiece.h"
@@ -113,14 +114,14 @@ Prog::Prog()
     list_count_(0),
     inst_(NULL),
     onepass_nodes_(NULL),
+    dfa_mem_(0),
     dfa_first_(NULL),
-    dfa_longest_(NULL),
-    dfa_mem_(0) {
+    dfa_longest_(NULL) {
 }
 
 Prog::~Prog() {
-  DeleteDFA(&dfa_first_);
-  DeleteDFA(&dfa_longest_);
+  DeleteDFA(dfa_longest_);
+  DeleteDFA(dfa_first_);
   delete[] onepass_nodes_;
   delete[] inst_;
 }
@@ -189,9 +190,9 @@ string Prog::DumpByteMap() {
 }
 
 int Prog::first_byte() {
-  std::call_once(first_byte_once_, [this]() {
-    first_byte_ = ComputeFirstByte();
-  });
+  std::call_once(first_byte_once_, [](Prog* prog) {
+    prog->first_byte_ = prog->ComputeFirstByte();
+  }, this);
   return first_byte_;
 }
 
@@ -369,7 +370,8 @@ class ByteMapBuilder {
   std::vector<std::pair<int, int>> colormap_;
   std::vector<std::pair<int, int>> ranges_;
 
-  DISALLOW_COPY_AND_ASSIGN(ByteMapBuilder);
+  ByteMapBuilder(const ByteMapBuilder&) = delete;
+  ByteMapBuilder& operator=(const ByteMapBuilder&) = delete;
 };
 
 void ByteMapBuilder::Mark(int lo, int hi) {
@@ -518,11 +520,11 @@ void Prog::ComputeByteMap() {
 
   builder.Build(bytemap_, &bytemap_range_);
 
-  if (0) {  // For debugging: use trivial bytemap.
+  if (0) {  // For debugging, use trivial bytemap.
+    LOG(ERROR) << "Using trivial bytemap.";
     for (int i = 0; i < 256; i++)
       bytemap_[i] = static_cast<uint8_t>(i);
     bytemap_range_ = 256;
-    LOG(INFO) << "Using trivial bytemap.";
   }
 }
 

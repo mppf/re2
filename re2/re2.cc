@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <algorithm>
 #include <iterator>
 #include <mutex>
 #include <string>
@@ -22,13 +23,12 @@
 #include <vector>
 
 #include "util/util.h"
-#include "util/flags.h"
+#include "util/logging.h"
 #include "util/sparse_array.h"
 #include "util/strutil.h"
+#include "util/utf.h"
 #include "re2/prog.h"
 #include "re2/regexp.h"
-
-DEFINE_bool(trace_re2, false, "trace RE2 execution");
 
 namespace re2 {
 
@@ -36,10 +36,7 @@ namespace re2 {
 static const int kMaxArgs = 16;
 static const int kVecSize = 1+kMaxArgs;
 
-// This will trigger LNK2005 error in MSVC.
-#ifndef _MSC_VER
 const int RE2::Options::kDefaultMaxMem;  // initialized in re2.h
-#endif
 
 RE2::Options::Options(RE2::CannedOptions opt)
   : encoding_(opt == RE2::Latin1 ? EncodingLatin1 : EncodingUTF8),
@@ -102,8 +99,8 @@ static RE2::ErrorCode RegexpErrorToRE2(re2::RegexpStatusCode code) {
 
 static string trunc(const StringPiece& pattern) {
   if (pattern.size() < 100)
-    return pattern.as_string();
-  return pattern.substr(0, 100).as_string() + "...";
+    return pattern.ToString();
+  return pattern.substr(0, 100).ToString() + "...";
 }
 
 
@@ -175,7 +172,7 @@ void RE2::Init(const StringPiece& pattern, const Options& options) {
     empty_group_names = new std::map<int, string>;
   });
 
-  pattern_ = pattern.as_string();
+  pattern_ = pattern.ToString();
   options_.Copy(options);
   entire_regexp_ = NULL;
   suffix_regexp_ = NULL;
@@ -201,7 +198,7 @@ void RE2::Init(const StringPiece& pattern, const Options& options) {
     }
     error_ = new string(status.Text());
     error_code_ = RegexpErrorToRE2(status.code());
-    error_arg_ = status.error_arg().as_string();
+    error_arg_ = status.error_arg().ToString();
     return;
   }
 
@@ -237,15 +234,16 @@ void RE2::Init(const StringPiece& pattern, const Options& options) {
 
 // Returns rprog_, computing it if needed.
 re2::Prog* RE2::ReverseProg() const {
-  std::call_once(rprog_once_, [this]() {
-    rprog_ = suffix_regexp_->CompileToReverseProg(options_.max_mem()/3);
-    if (rprog_ == NULL) {
-      if (options_.log_errors())
-        LOG(ERROR) << "Error reverse compiling '" << trunc(pattern_) << "'";
-      error_ = new string("pattern too large - reverse compile failed");
-      error_code_ = RE2::ErrorPatternTooLarge;
+  std::call_once(rprog_once_, [](const RE2* re) {
+    re->rprog_ =
+        re->suffix_regexp_->CompileToReverseProg(re->options_.max_mem() / 3);
+    if (re->rprog_ == NULL) {
+      if (re->options_.log_errors())
+        LOG(ERROR) << "Error reverse compiling '" << trunc(re->pattern_) << "'";
+      re->error_ = new string("pattern too large - reverse compile failed");
+      re->error_code_ = RE2::ErrorPatternTooLarge;
     }
-  });
+  }, this);
   return rprog_;
 }
 
@@ -290,32 +288,32 @@ int RE2::ProgramFanout(std::map<int, int>* histogram) const {
 // Returns num_captures_, computing it if needed, or -1 if the
 // regexp wasn't valid on construction.
 int RE2::NumberOfCapturingGroups() const {
-  std::call_once(num_captures_once_, [this]() {
-    if (suffix_regexp_ != NULL)
-      num_captures_ = suffix_regexp_->NumCaptures();
-  });
+  std::call_once(num_captures_once_, [](const RE2* re) {
+    if (re->suffix_regexp_ != NULL)
+      re->num_captures_ = re->suffix_regexp_->NumCaptures();
+  }, this);
   return num_captures_;
 }
 
 // Returns named_groups_, computing it if needed.
 const std::map<string, int>& RE2::NamedCapturingGroups() const {
-  std::call_once(named_groups_once_, [this]() {
-    if (suffix_regexp_ != NULL)
-      named_groups_ = suffix_regexp_->NamedCaptures();
-    if (named_groups_ == NULL)
-      named_groups_ = empty_named_groups;
-  });
+  std::call_once(named_groups_once_, [](const RE2* re) {
+    if (re->suffix_regexp_ != NULL)
+      re->named_groups_ = re->suffix_regexp_->NamedCaptures();
+    if (re->named_groups_ == NULL)
+      re->named_groups_ = empty_named_groups;
+  }, this);
   return *named_groups_;
 }
 
 // Returns group_names_, computing it if needed.
 const std::map<int, string>& RE2::CapturingGroupNames() const {
-  std::call_once(group_names_once_, [this]() {
-    if (suffix_regexp_ != NULL)
-      group_names_ = suffix_regexp_->CaptureNames();
-    if (group_names_ == NULL)
-      group_names_ = empty_group_names;
-  });
+  std::call_once(group_names_once_, [](const RE2* re) {
+    if (re->suffix_regexp_ != NULL)
+      re->group_names_ = re->suffix_regexp_->CaptureNames();
+    if (re->group_names_ == NULL)
+      re->group_names_ = empty_group_names;
+  }, this);
   return *group_names_;
 }
 
@@ -333,7 +331,7 @@ bool RE2::PartialMatchN(const StringPiece& text, const RE2& re,
 
 bool RE2::ConsumeN(StringPiece* input, const RE2& re,
                    const Arg* const args[], int n) {
-  int consumed;
+  size_t consumed;
   if (re.DoMatch(*input, ANCHOR_START, &consumed, args, n)) {
     input->remove_prefix(consumed);
     return true;
@@ -344,7 +342,7 @@ bool RE2::ConsumeN(StringPiece* input, const RE2& re,
 
 bool RE2::FindAndConsumeN(StringPiece* input, const RE2& re,
                           const Arg* const args[], int n) {
-  int consumed;
+  size_t consumed;
   if (re.DoMatch(*input, UNANCHORED, &consumed, args, n)) {
     input->remove_prefix(consumed);
     return true;
@@ -379,7 +377,7 @@ bool RE2::Replace(string *str,
   int nvec = 1 + MaxSubmatch(rewrite);
   if (nvec > arraysize(vec))
     return false;
-  if (!re.Match(*str, 0, static_cast<int>(str->size()), UNANCHORED, vec, nvec))
+  if (!re.Match(*str, 0, str->size(), UNANCHORED, vec, nvec))
     return false;
 
   string s;
@@ -406,15 +404,19 @@ int RE2::GlobalReplace(string *str,
   string out;
   int count = 0;
   while (p <= ep) {
-    if (!re.Match(*str, static_cast<int>(p - str->data()),
-                  static_cast<int>(str->size()), UNANCHORED, vec, nvec))
+    if (!re.Match(*str, static_cast<size_t>(p - str->data()),
+                  str->size(), UNANCHORED, vec, nvec))
       break;
     if (p < vec[0].begin())
       out.append(p, vec[0].begin() - p);
     if (vec[0].begin() == lastend && vec[0].size() == 0) {
       // Disallow empty match at end of last match: skip ahead.
+      //
+      // fullrune() takes int, not size_t. However, it just looks
+      // at the leading byte and treats any length >= 4 the same.
       if (re.options().encoding() == RE2::Options::EncodingUTF8 &&
-          fullrune(p, static_cast<int>(ep - p))) {
+          fullrune(p, static_cast<int>(std::min(static_cast<ptrdiff_t>(4),
+                                                ep - p)))) {
         // re is in UTF-8 mode and there is enough left of str
         // to allow us to advance by up to UTFmax bytes.
         Rune r;
@@ -481,7 +483,7 @@ string RE2::QuoteMeta(const StringPiece& unquoted) {
   // that.  (This also makes it identical to the perl function of the
   // same name except for the null-character special case;
   // see `perldoc -f quotemeta`.)
-  for (int ii = 0; ii < unquoted.length(); ++ii) {
+  for (size_t ii = 0; ii < unquoted.size(); ++ii) {
     // Note that using 'isalnum' here raises the benchmark time from
     // 32ns to 58ns:
     if ((unquoted[ii] < 'a' || unquoted[ii] > 'z') &&
@@ -554,7 +556,7 @@ bool RE2::PossibleMatchRange(string* min, string* max, int maxlen) const {
 // Avoid possible locale nonsense in standard strcasecmp.
 // The string a is known to be all lowercase.
 template<typename ptr_type>
-static int ascii_strcasecmp(const char* a, ptr_type b, int len) {
+static int ascii_strcasecmp(const char* a, ptr_type b, size_t len) {
   const char* ae = a + len;
 
   for (; a < ae; a++, b++) {
@@ -572,8 +574,8 @@ static int ascii_strcasecmp(const char* a, ptr_type b, int len) {
 /***** Actual matching and rewriting code *****/
 
 bool RE2::Match(const StringPiece& text,
-                int startpos,
-                int endpos,
+                size_t startpos,
+                size_t endpos,
                 Anchor re_anchor,
                 StringPiece* submatch,
                 int nsubmatch) const {
@@ -583,7 +585,7 @@ bool RE2::Match(const StringPiece& text,
     return false;
   }
 
-  if (startpos < 0 || startpos > endpos || endpos > text.size()) {
+  if (startpos > endpos || endpos > text.size()) {
     if (options_.log_errors())
       LOG(ERROR) << "RE2: invalid startpos, endpos pair. ["
                  << "startpos: " << startpos << ", "
@@ -621,11 +623,11 @@ bool RE2::Match(const StringPiece& text,
     re_anchor = ANCHOR_START;
 
   // Check for the required prefix, if any.
-  int prefixlen = 0;
+  size_t prefixlen = 0;
   if (!prefix_.empty()) {
     if (startpos != 0)
       return false;
-    prefixlen = static_cast<int>(prefix_.size());
+    prefixlen = prefix_.size();
     if (prefixlen > subtext.size())
       return false;
     if (prefix_foldcase_) {
@@ -657,7 +659,7 @@ bool RE2::Match(const StringPiece& text,
   const int MaxBitStateProg = 500;   // prog_->size() <= Max.
   const int MaxBitStateVector = 256*1024;  // bit vector size <= Max (bits)
   bool can_bit_state = prog_->size() <= MaxBitStateProg;
-  int bit_state_text_max = MaxBitStateVector / prog_->size();
+  size_t bit_state_text_max = MaxBitStateVector / prog_->size();
 
   bool dfa_failed = false;
   switch (re_anchor) {
@@ -666,24 +668,16 @@ bool RE2::Match(const StringPiece& text,
       if (!prog_->SearchDFA(subtext, text, anchor, kind,
                             matchp, &dfa_failed, NULL)) {
         if (dfa_failed) {
+          if (options_.log_errors())
+            LOG(ERROR) << "DFA out of memory: size " << prog_->size() << ", "
+                       << "bytemap range " << prog_->bytemap_range() << ", "
+                       << "list count " << prog_->list_count();
           // Fall back to NFA below.
           skipped_test = true;
-          if (FLAGS_trace_re2)
-            LOG(INFO) << "Match " << trunc(pattern_)
-                      << " [" << CEscape(subtext) << "]"
-                      << " DFA failed.";
           break;
         }
-        if (FLAGS_trace_re2)
-          LOG(INFO) << "Match " << trunc(pattern_)
-                    << " [" << CEscape(subtext) << "]"
-                    << " used DFA - no match.";
         return false;
       }
-      if (FLAGS_trace_re2)
-        LOG(INFO) << "Match " << trunc(pattern_)
-                  << " [" << CEscape(subtext) << "]"
-                  << " used DFA - match";
       if (matchp == NULL)  // Matched.  Don't care where
         return true;
       // SearchDFA set match[0].end() but didn't know where the
@@ -695,26 +689,18 @@ bool RE2::Match(const StringPiece& text,
       if (!prog->SearchDFA(match, text, Prog::kAnchored,
                            Prog::kLongestMatch, &match, &dfa_failed, NULL)) {
         if (dfa_failed) {
+          if (options_.log_errors())
+            LOG(ERROR) << "DFA out of memory: size " << prog_->size() << ", "
+                       << "bytemap range " << prog_->bytemap_range() << ", "
+                       << "list count " << prog_->list_count();
           // Fall back to NFA below.
           skipped_test = true;
-          if (FLAGS_trace_re2)
-            LOG(INFO) << "Match " << trunc(pattern_)
-                      << " [" << CEscape(subtext) << "]"
-                      << " reverse DFA failed.";
           break;
         }
-        if (FLAGS_trace_re2)
-          LOG(INFO) << "Match " << trunc(pattern_)
-                    << " [" << CEscape(subtext) << "]"
-                    << " DFA inconsistency.";
         if (options_.log_errors())
-          LOG(ERROR) << "DFA inconsistency";
+          LOG(ERROR) << "SearchDFA inconsistency";
         return false;
       }
-      if (FLAGS_trace_re2)
-        LOG(INFO) << "Match " << trunc(pattern_)
-                  << " [" << CEscape(subtext) << "]"
-                  << " used reverse DFA.";
       break;
     }
 
@@ -733,35 +719,24 @@ bool RE2::Match(const StringPiece& text,
       // the DFA does.
       if (can_one_pass && text.size() <= 4096 &&
           (ncap > 1 || text.size() <= 8)) {
-        if (FLAGS_trace_re2)
-          LOG(INFO) << "Match " << trunc(pattern_)
-                    << " [" << CEscape(subtext) << "]"
-                    << " skipping DFA for OnePass.";
         skipped_test = true;
         break;
       }
       if (can_bit_state && text.size() <= bit_state_text_max && ncap > 1) {
-        if (FLAGS_trace_re2)
-          LOG(INFO) << "Match " << trunc(pattern_)
-                    << " [" << CEscape(subtext) << "]"
-                    << " skipping DFA for BitState.";
         skipped_test = true;
         break;
       }
       if (!prog_->SearchDFA(subtext, text, anchor, kind,
                             &match, &dfa_failed, NULL)) {
         if (dfa_failed) {
-          if (FLAGS_trace_re2)
-            LOG(INFO) << "Match " << trunc(pattern_)
-                      << " [" << CEscape(subtext) << "]"
-                      << " DFA failed.";
+          if (options_.log_errors())
+            LOG(ERROR) << "DFA out of memory: size " << prog_->size() << ", "
+                       << "bytemap range " << prog_->bytemap_range() << ", "
+                       << "list count " << prog_->list_count();
+          // Fall back to NFA below.
           skipped_test = true;
           break;
         }
-        if (FLAGS_trace_re2)
-          LOG(INFO) << "Match " << trunc(pattern_)
-                    << " [" << CEscape(subtext) << "]"
-                    << " used DFA - no match.";
         return false;
       }
       break;
@@ -787,20 +762,12 @@ bool RE2::Match(const StringPiece& text,
     }
 
     if (can_one_pass && anchor != Prog::kUnanchored) {
-      if (FLAGS_trace_re2)
-        LOG(INFO) << "Match " << trunc(pattern_)
-                  << " [" << CEscape(subtext) << "]"
-                  << " using OnePass.";
       if (!prog_->SearchOnePass(subtext1, text, anchor, kind, submatch, ncap)) {
         if (!skipped_test && options_.log_errors())
           LOG(ERROR) << "SearchOnePass inconsistency";
         return false;
       }
     } else if (can_bit_state && subtext1.size() <= bit_state_text_max) {
-      if (FLAGS_trace_re2)
-        LOG(INFO) << "Match " << trunc(pattern_)
-                  << " [" << CEscape(subtext) << "]"
-                  << " using BitState.";
       if (!prog_->SearchBitState(subtext1, text, anchor,
                                  kind, submatch, ncap)) {
         if (!skipped_test && options_.log_errors())
@@ -808,10 +775,6 @@ bool RE2::Match(const StringPiece& text,
         return false;
       }
     } else {
-      if (FLAGS_trace_re2)
-        LOG(INFO) << "Match " << trunc(pattern_)
-                  << " [" << CEscape(subtext) << "]"
-                  << " using NFA.";
       if (!prog_->SearchNFA(subtext1, text, anchor, kind, submatch, ncap)) {
         if (!skipped_test && options_.log_errors())
           LOG(ERROR) << "SearchNFA inconsistency";
@@ -822,7 +785,7 @@ bool RE2::Match(const StringPiece& text,
 
   // Adjust overall match for required prefix that we stripped off.
   if (prefixlen > 0 && nsubmatch > 0)
-    submatch[0] = StringPiece(submatch[0].begin() - prefixlen,
+    submatch[0] = StringPiece(submatch[0].data() - prefixlen,
                               submatch[0].size() + prefixlen);
 
   // Zero submatches that don't exist in the regexp.
@@ -970,7 +933,7 @@ bool RE2::MatchFile(FilePiece& text,
 // Internal matcher - like Match() but takes Args not StringPieces.
 bool RE2::DoMatch(const StringPiece& text,
                   Anchor anchor,
-                  int* consumed,
+                  size_t* consumed,
                   const Arg* const* args,
                   int n) const {
   if (!ok()) {
@@ -1003,7 +966,7 @@ bool RE2::DoMatch(const StringPiece& text,
   }
 
   if (consumed != NULL)
-    *consumed = static_cast<int>(vec[0].end() - text.begin());
+    *consumed = static_cast<size_t>(vec[0].end() - text.begin());
 
   if (n == 0 || args == NULL) {
     // We are not interested in results
@@ -1014,7 +977,6 @@ bool RE2::DoMatch(const StringPiece& text,
   int ncap = NumberOfCapturingGroups();
   if (ncap < n) {
     // RE has fewer capturing groups than number of arg pointers passed in
-    VLOG(1) << "Asked for " << n << " but only have " << ncap;
     delete[] heapvec;
     return false;
   }
@@ -1024,8 +986,6 @@ bool RE2::DoMatch(const StringPiece& text,
     const StringPiece& s = vec[i+1];
     if (!args[i]->Parse(s.data(), s.size())) {
       // TODO: Should we indicate what the error was?
-      VLOG(1) << "Parse error on #" << i << " " << s << " "
-              << (void*)s.data() << "/" << s.size();
       delete[] heapvec;
       return false;
     }
@@ -1110,38 +1070,38 @@ bool RE2::CheckRewriteString(const StringPiece& rewrite, string* error) const {
 
 /***** Parsers for various types *****/
 
-bool RE2::Arg::parse_null(const char* str, int n, void* dest) {
+bool RE2::Arg::parse_null(const char* str, size_t n, void* dest) {
   // We fail if somebody asked us to store into a non-NULL void* pointer
   return (dest == NULL);
 }
 
-bool RE2::Arg::parse_string(const char* str, int n, void* dest) {
+bool RE2::Arg::parse_string(const char* str, size_t n, void* dest) {
   if (dest == NULL) return true;
   reinterpret_cast<string*>(dest)->assign(str, n);
   return true;
 }
 
-bool RE2::Arg::parse_stringpiece(const char* str, int n, void* dest) {
+bool RE2::Arg::parse_stringpiece(const char* str, size_t n, void* dest) {
   if (dest == NULL) return true;
-  reinterpret_cast<StringPiece*>(dest)->set(str, n);
+  *(reinterpret_cast<StringPiece*>(dest)) = StringPiece(str, n);
   return true;
 }
 
-bool RE2::Arg::parse_char(const char* str, int n, void* dest) {
+bool RE2::Arg::parse_char(const char* str, size_t n, void* dest) {
   if (n != 1) return false;
   if (dest == NULL) return true;
   *(reinterpret_cast<char*>(dest)) = str[0];
   return true;
 }
 
-bool RE2::Arg::parse_schar(const char* str, int n, void* dest) {
+bool RE2::Arg::parse_schar(const char* str, size_t n, void* dest) {
   if (n != 1) return false;
   if (dest == NULL) return true;
   *(reinterpret_cast<signed char*>(dest)) = str[0];
   return true;
 }
 
-bool RE2::Arg::parse_uchar(const char* str, int n, void* dest) {
+bool RE2::Arg::parse_uchar(const char* str, size_t n, void* dest) {
   if (n != 1) return false;
   if (dest == NULL) return true;
   *(reinterpret_cast<unsigned char*>(dest)) = str[0];
@@ -1154,10 +1114,10 @@ static const int kMaxNumberLength = 32;
 // REQUIRES "buf" must have length at least nbuf.
 // Copies "str" into "buf" and null-terminates.
 // Overwrites *np with the new length.
-static const char* TerminateNumber(char* buf, int nbuf, const char* str, int* np,
-                                   bool accept_spaces) {
-  int n = *np;
-  if (n <= 0) return "";
+static const char* TerminateNumber(char* buf, size_t nbuf, const char* str,
+                                   size_t* np, bool accept_spaces) {
+  size_t n = *np;
+  if (n == 0) return "";
   if (n > 0 && isspace(*str)) {
     // We are less forgiving than the strtoxxx() routines and do not
     // allow leading spaces. We do allow leading spaces for floats.
@@ -1209,9 +1169,9 @@ static const char* TerminateNumber(char* buf, int nbuf, const char* str, int* np
 }
 
 bool RE2::Arg::parse_long_radix(const char* str,
-                               int n,
-                               void* dest,
-                               int radix) {
+                                size_t n,
+                                void* dest,
+                                int radix) {
   if (n == 0) return false;
   char buf[kMaxNumberLength+1];
   str = TerminateNumber(buf, sizeof buf, str, &n, false);
@@ -1226,16 +1186,16 @@ bool RE2::Arg::parse_long_radix(const char* str,
 }
 
 bool RE2::Arg::parse_ulong_radix(const char* str,
-                                int n,
-                                void* dest,
-                                int radix) {
+                                 size_t n,
+                                 void* dest,
+                                 int radix) {
   if (n == 0) return false;
   char buf[kMaxNumberLength+1];
   str = TerminateNumber(buf, sizeof buf, str, &n, false);
   if (str[0] == '-') {
-   // strtoul() will silently accept negative numbers and parse
-   // them.  This module is more strict and treats them as errors.
-   return false;
+    // strtoul() will silently accept negative numbers and parse
+    // them.  This module is more strict and treats them as errors.
+    return false;
   }
 
   char* end;
@@ -1249,9 +1209,9 @@ bool RE2::Arg::parse_ulong_radix(const char* str,
 }
 
 bool RE2::Arg::parse_short_radix(const char* str,
-                                int n,
-                                void* dest,
-                                int radix) {
+                                 size_t n,
+                                 void* dest,
+                                 int radix) {
   long r;
   if (!parse_long_radix(str, n, &r, radix)) return false;  // Could not parse
   if ((short)r != r) return false;                         // Out of range
@@ -1261,9 +1221,9 @@ bool RE2::Arg::parse_short_radix(const char* str,
 }
 
 bool RE2::Arg::parse_ushort_radix(const char* str,
-                                 int n,
-                                 void* dest,
-                                 int radix) {
+                                  size_t n,
+                                  void* dest,
+                                  int radix) {
   unsigned long r;
   if (!parse_ulong_radix(str, n, &r, radix)) return false;  // Could not parse
   if ((unsigned short)r != r) return false;                 // Out of range
@@ -1273,9 +1233,9 @@ bool RE2::Arg::parse_ushort_radix(const char* str,
 }
 
 bool RE2::Arg::parse_int_radix(const char* str,
-                              int n,
-                              void* dest,
-                              int radix) {
+                               size_t n,
+                               void* dest,
+                               int radix) {
   long r;
   if (!parse_long_radix(str, n, &r, radix)) return false;  // Could not parse
   if ((int)r != r) return false;                           // Out of range
@@ -1285,9 +1245,9 @@ bool RE2::Arg::parse_int_radix(const char* str,
 }
 
 bool RE2::Arg::parse_uint_radix(const char* str,
-                               int n,
-                               void* dest,
-                               int radix) {
+                                size_t n,
+                                void* dest,
+                                int radix) {
   unsigned long r;
   if (!parse_ulong_radix(str, n, &r, radix)) return false;  // Could not parse
   if ((unsigned int)r != r) return false;                   // Out of range
@@ -1297,9 +1257,9 @@ bool RE2::Arg::parse_uint_radix(const char* str,
 }
 
 bool RE2::Arg::parse_longlong_radix(const char* str,
-                                   int n,
-                                   void* dest,
-                                   int radix) {
+                                    size_t n,
+                                    void* dest,
+                                    int radix) {
   if (n == 0) return false;
   char buf[kMaxNumberLength+1];
   str = TerminateNumber(buf, sizeof buf, str, &n, false);
@@ -1314,9 +1274,9 @@ bool RE2::Arg::parse_longlong_radix(const char* str,
 }
 
 bool RE2::Arg::parse_ulonglong_radix(const char* str,
-                                    int n,
-                                    void* dest,
-                                    int radix) {
+                                     size_t n,
+                                     void* dest,
+                                     int radix) {
   if (n == 0) return false;
   char buf[kMaxNumberLength+1];
   str = TerminateNumber(buf, sizeof buf, str, &n, false);
@@ -1335,7 +1295,8 @@ bool RE2::Arg::parse_ulonglong_radix(const char* str,
   return true;
 }
 
-static bool parse_double_float(const char* str, int n, bool isfloat, void *dest) {
+static bool parse_double_float(const char* str, size_t n, bool isfloat,
+                               void* dest) {
   if (n == 0) return false;
   static const int kMaxLength = 200;
   char buf[kMaxLength+1];
@@ -1359,26 +1320,27 @@ static bool parse_double_float(const char* str, int n, bool isfloat, void *dest)
   return true;
 }
 
-bool RE2::Arg::parse_double(const char* str, int n, void* dest) {
+bool RE2::Arg::parse_double(const char* str, size_t n, void* dest) {
   return parse_double_float(str, n, false, dest);
 }
 
-bool RE2::Arg::parse_float(const char* str, int n, void* dest) {
+bool RE2::Arg::parse_float(const char* str, size_t n, void* dest) {
   return parse_double_float(str, n, true, dest);
 }
 
-#define DEFINE_INTEGER_PARSER(name)                                          \
-  bool RE2::Arg::parse_##name(const char* str, int n, void* dest) {          \
-    return parse_##name##_radix(str, n, dest, 10);                           \
-  }                                                                          \
-  bool RE2::Arg::parse_##name##_hex(const char* str, int n, void* dest) {    \
-    return parse_##name##_radix(str, n, dest, 16);                           \
-  }                                                                          \
-  bool RE2::Arg::parse_##name##_octal(const char* str, int n, void* dest) {  \
-    return parse_##name##_radix(str, n, dest, 8);                            \
-  }                                                                          \
-  bool RE2::Arg::parse_##name##_cradix(const char* str, int n, void* dest) { \
-    return parse_##name##_radix(str, n, dest, 0);                            \
+#define DEFINE_INTEGER_PARSER(name)                                            \
+  bool RE2::Arg::parse_##name(const char* str, size_t n, void* dest) {         \
+    return parse_##name##_radix(str, n, dest, 10);                             \
+  }                                                                            \
+  bool RE2::Arg::parse_##name##_hex(const char* str, size_t n, void* dest) {   \
+    return parse_##name##_radix(str, n, dest, 16);                             \
+  }                                                                            \
+  bool RE2::Arg::parse_##name##_octal(const char* str, size_t n, void* dest) { \
+    return parse_##name##_radix(str, n, dest, 8);                              \
+  }                                                                            \
+  bool RE2::Arg::parse_##name##_cradix(const char* str, size_t n,              \
+                                       void* dest) {                           \
+    return parse_##name##_radix(str, n, dest, 0);                              \
   }
 
 DEFINE_INTEGER_PARSER(short);

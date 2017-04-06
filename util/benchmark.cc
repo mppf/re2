@@ -3,6 +3,8 @@
 // license that can be found in the LICENSE file.
 
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <algorithm>
 #include <chrono>
 
@@ -12,6 +14,10 @@
 #include "re2/re2.h"
 
 DEFINE_string(test_tmpdir, "/var/tmp", "temp directory");
+
+#ifdef _WIN32
+#define snprintf _snprintf
+#endif
 
 using testing::Benchmark;
 
@@ -75,7 +81,7 @@ static void runN(Benchmark *b, int n, int siz) {
 		b->fnr(n, siz);
 	else {
 		fprintf(stderr, "%s: missing function\n", b->name);
-		exit(2);
+		abort();
 	}
 	if(t0 != 0)
 		ns += nsec() - t0;

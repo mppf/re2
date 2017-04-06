@@ -17,6 +17,9 @@
 #include <vector>
 
 #include "util/util.h"
+#include "util/logging.h"
+#include "util/mutex.h"
+#include "util/utf.h"
 #include "re2/stringpiece.h"
 #include "re2/walker-inl.h"
 
@@ -536,7 +539,9 @@ class NumCapturesWalker : public Regexp::Walker<Ignored> {
 
  private:
   int ncapture_;
-  DISALLOW_COPY_AND_ASSIGN(NumCapturesWalker);
+
+  NumCapturesWalker(const NumCapturesWalker&) = delete;
+  NumCapturesWalker& operator=(const NumCapturesWalker&) = delete;
 };
 
 int Regexp::NumCaptures() {
@@ -580,7 +585,9 @@ class NamedCapturesWalker : public Regexp::Walker<Ignored> {
 
  private:
   std::map<string, int>* map_;
-  DISALLOW_COPY_AND_ASSIGN(NamedCapturesWalker);
+
+  NamedCapturesWalker(const NamedCapturesWalker&) = delete;
+  NamedCapturesWalker& operator=(const NamedCapturesWalker&) = delete;
 };
 
 std::map<string, int>* Regexp::NamedCaptures() {
@@ -620,7 +627,9 @@ class CaptureNamesWalker : public Regexp::Walker<Ignored> {
 
  private:
   std::map<int, string>* map_;
-  DISALLOW_COPY_AND_ASSIGN(CaptureNamesWalker);
+
+  CaptureNamesWalker(const CaptureNamesWalker&) = delete;
+  CaptureNamesWalker& operator=(const CaptureNamesWalker&) = delete;
 };
 
 std::map<int, string>* Regexp::CaptureNames() {

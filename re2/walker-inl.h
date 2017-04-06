@@ -15,6 +15,7 @@
 
 #include <stack>
 
+#include "util/logging.h"
 #include "re2/regexp.h"
 
 namespace re2 {
@@ -94,7 +95,8 @@ template<typename T> class Regexp::Walker {
 
   T WalkInternal(Regexp* re, T top_arg, bool use_copy);
 
-  DISALLOW_COPY_AND_ASSIGN(Walker);
+  Walker(const Walker&) = delete;
+  Walker& operator=(const Walker&) = delete;
 };
 
 template<typename T> T Regexp::Walker<T>::PreVisit(Regexp* re,

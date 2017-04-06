@@ -92,6 +92,8 @@
 #include <string>
 
 #include "util/util.h"
+#include "util/logging.h"
+#include "util/utf.h"
 #include "re2/stringpiece.h"
 
 namespace re2 {
@@ -213,7 +215,8 @@ class RegexpStatus {
   StringPiece error_arg_;       // Piece of regexp containing syntax error.
   string* tmp_;                 // Temporary storage, possibly where error_arg_ is.
 
-  DISALLOW_COPY_AND_ASSIGN(RegexpStatus);
+  RegexpStatus(const RegexpStatus&) = delete;
+  RegexpStatus& operator=(const RegexpStatus&) = delete;
 };
 
 // Compiled form; see prog.h
@@ -263,7 +266,9 @@ class CharClass {
   int nrunes_;
   RuneRange *ranges_;
   int nranges_;
-  DISALLOW_COPY_AND_ASSIGN(CharClass);
+
+  CharClass(const CharClass&) = delete;
+  CharClass& operator=(const CharClass&) = delete;
 };
 
 class Regexp {
@@ -495,8 +500,7 @@ class Regexp {
 
   // Allocate space for n sub-regexps.
   void AllocSub(int n) {
-    if (n < 0 || static_cast<uint16_t>(n) != n)
-      LOG(FATAL) << "Cannot AllocSub " << n;
+    DCHECK(n >= 0 && static_cast<uint16_t>(n) == n);
     if (n > 1)
       submany_ = new Regexp*[n];
     nsub_ = n;
@@ -575,7 +579,8 @@ class Regexp {
     void *the_union_[2];  // as big as any other element, for memset
   };
 
-  DISALLOW_COPY_AND_ASSIGN(Regexp);
+  Regexp(const Regexp&) = delete;
+  Regexp& operator=(const Regexp&) = delete;
 };
 
 // Character class set: contains non-overlapping, non-abutting RuneRanges.
@@ -609,7 +614,9 @@ class CharClassBuilder {
   uint32_t lower_;  // bitmap of a-z
   int nrunes_;
   RuneRangeSet ranges_;
-  DISALLOW_COPY_AND_ASSIGN(CharClassBuilder);
+
+  CharClassBuilder(const CharClassBuilder&) = delete;
+  CharClassBuilder& operator=(const CharClassBuilder&) = delete;
 };
 
 // Tell g++ that bitwise ops on ParseFlags produce ParseFlags.

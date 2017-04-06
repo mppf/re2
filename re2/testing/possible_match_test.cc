@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "util/test.h"
+#include "util/logging.h"
 #include "util/strutil.h"
 #include "re2/prog.h"
 #include "re2/re2.h"
@@ -191,7 +192,8 @@ class PossibleMatchTester : public RegexpGenerator {
   int regexps_;   // Number of HandleRegexp calls
   int tests_;     // Number of regexp tests.
 
-  DISALLOW_COPY_AND_ASSIGN(PossibleMatchTester);
+  PossibleMatchTester(const PossibleMatchTester&) = delete;
+  PossibleMatchTester& operator=(const PossibleMatchTester&) = delete;
 };
 
 // Processes a single generated regexp.
