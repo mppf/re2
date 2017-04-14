@@ -189,7 +189,7 @@ void OnePass_Checks() {
 }
 
 template<typename StrPiece>
-static bool Satisfy(uint32 cond, const StrPiece& context, typename StrPiece::ptr_rd_type p) {
+static bool Satisfy(uint32_t cond, const StrPiece& context, typename StrPiece::ptr_rd_type p) {
   uint32_t satisfied = Prog::EmptyFlags(context, p);
   if (cond & kEmptyAllFlags & ~satisfied)
     return false;
@@ -268,7 +268,7 @@ bool Prog::SearchOnePass(const StrPiece& text,
 
     // Determine whether we can reach act->next.
     // If so, advance state and nextmatchcond.
-    if ((cond & kEmptyAllFlags) == 0 || Satisfy(cond, context, p)) {
+    if ((cond & kEmptyAllFlags) == 0 || Satisfy<StrPiece>(cond, context, p)) {
       uint32_t nextindex = cond >> kIndexShift;
       state = IndexToNode(nodes, statesize, nextindex);
       nextmatchcond = state->matchcond;

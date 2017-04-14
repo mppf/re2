@@ -324,10 +324,10 @@ uint32_t Prog::EmptyFlags(const StrPiece& text, typename StrPiece::ptr_rd_type p
 }
 
 template
-uint32 Prog::EmptyFlags<StringPiece>(const StringPiece& text, const char* p);
+uint32_t Prog::EmptyFlags<StringPiece>(const StringPiece& text, const char* p);
 
 template
-uint32 Prog::EmptyFlags<FilePiece>(const FilePiece& text, FilePiece::ptr_rd_type p);
+uint32_t Prog::EmptyFlags<FilePiece>(const FilePiece& text, FilePiece::ptr_rd_type p);
 
 // ByteMapBuilder implements a coloring algorithm.
 //

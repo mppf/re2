@@ -132,7 +132,7 @@ class StringPiece {
   }
 
   // Also define begin_reading
-  const_iterator begin_reading() const { return ptr_; }
+  const_iterator begin_reading() const { return data_; }
 
   size_type copy(char* buf, size_type n, size_type pos = 0) const;
   StringPiece substr(size_type pos = 0, size_type n = npos) const;

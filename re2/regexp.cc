@@ -1057,7 +1057,8 @@ class SizeWalker : public Regexp::Walker<Range> {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(SizeWalker);
+  SizeWalker(const SizeWalker&) = delete;
+  SizeWalker& operator=(const SizeWalker&) = delete;
 };
 
 // Visits re after children are processed.

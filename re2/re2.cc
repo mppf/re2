@@ -841,8 +841,8 @@ bool RE2::MatchFile(FilePiece& text,
       // There was no match.
       // Given the minimum and maximum match lengths...
       // compute a skip.
-      if( max_match_length_ != -1 &&
-          buffer.size() > max_match_length_ ) {
+      if( max_match_length_ >= 0 &&
+          buffer.size() > (size_t) max_match_length_ ) {
         skip = buffer.size() - max_match_length_ - 1;
       }
     }
@@ -854,9 +854,6 @@ bool RE2::MatchFile(FilePiece& text,
   // The rest of this doesn't use DFA search.
   //
   FilePiece match;
-  FilePiece* matchp = &match;
-  if (nsubmatch == 0)
-    matchp = NULL;
 
   int ncap = 1 + NumberOfCapturingGroups();
   if (ncap > nsubmatch)
@@ -909,16 +906,10 @@ bool RE2::MatchFile(FilePiece& text,
   {
     FilePiece subtext1 = subtext;
     if (can_one_pass && anchor != Prog::kUnanchored) {
-      if (FLAGS_trace_re2)
-        LOG(INFO) << "Match " << trunc(pattern_)
-                  << " using OnePass.";
       if (!prog_->SearchOnePass(subtext1, text, anchor, kind, submatch, ncap)) {
         return false;
       }
     } else {
-      if (FLAGS_trace_re2)
-        LOG(INFO) << "Match " << trunc(pattern_)
-                  << " using NFA.";
       if (!prog_->SearchNFA(subtext1, text, anchor, kind, submatch, ncap)) {
         return false;
       }
