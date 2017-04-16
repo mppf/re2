@@ -310,6 +310,7 @@ bool Prog::SearchOnePass(const StrPiece& text,
         ApplyCaptures(matchcond, p, matchcap, ncap);
       matchcap[1] = p;
       matched = true;
+
       // If we're in longest match mode, we have to keep
       // going and see if we find a longer match.
       // In first match mode, we can stop if the match
